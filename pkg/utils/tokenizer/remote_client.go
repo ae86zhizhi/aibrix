@@ -102,14 +102,14 @@ func (c *HTTPClient) Post(ctx context.Context, path string, request interface{})
 			lastErr = fmt.Errorf("request failed: %w", err)
 			continue
 		}
-		defer func() {
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				klog.V(2).InfoS("Failed to close response body", "error", closeErr)
-			}
-		}()
 
-		// Read response body
+		// Read response body and ensure it's closed
 		body, err := io.ReadAll(resp.Body)
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
+			klog.V(2).InfoS("Failed to close response body", "error", closeErr)
+		}
+
 		if err != nil {
 			lastErr = fmt.Errorf("failed to read response: %w", err)
 			continue
