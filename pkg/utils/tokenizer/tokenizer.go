@@ -24,7 +24,7 @@ import (
 // This file now only contains the backward-compatible NewTokenizer function
 
 // NewTokenizer creates a tokenizer instance based on the provided type
-// Deprecated: Use NewTokenizerFromType for clearer API
+// Deprecated: Use specific factory functions like NewRemoteTokenizer, NewTiktokenTokenizer, or NewCharacterTokenizer instead
 func NewTokenizer(tokenizerType string, config interface{}) (Tokenizer, error) {
 	switch tokenizerType {
 	case "tiktoken":

@@ -41,6 +41,11 @@ func (e ErrTokenizationFailed) Error() string {
 	return msg
 }
 
+// Unwrap returns the underlying error cause
+func (e ErrTokenizationFailed) Unwrap() error {
+	return e.Cause
+}
+
 // ErrDetokenizationFailed represents a detokenization failure
 type ErrDetokenizationFailed struct {
 	Message string
@@ -53,6 +58,11 @@ func (e ErrDetokenizationFailed) Error() string {
 		msg += ": " + e.Cause.Error()
 	}
 	return msg
+}
+
+// Unwrap returns the underlying error cause
+func (e ErrDetokenizationFailed) Unwrap() error {
+	return e.Cause
 }
 
 // ErrUnsupportedOperation represents an error when an operation is not supported by the engine

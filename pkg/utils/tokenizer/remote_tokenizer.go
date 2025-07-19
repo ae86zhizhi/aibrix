@@ -21,6 +21,12 @@ import (
 	"time"
 )
 
+const (
+	// Default values for RemoteTokenizerConfig
+	defaultRemoteTimeout    = 30 * time.Second
+	defaultRemoteMaxRetries = 3
+)
+
 // RemoteTokenizerImpl implements the RemoteTokenizer interface
 type RemoteTokenizerImpl struct {
 	config  RemoteTokenizerConfig
@@ -202,10 +208,10 @@ func validateRemoteConfig(c *RemoteTokenizerConfig) error {
 		return ErrInvalidConfig{Message: "Endpoint cannot be empty"}
 	}
 	if c.Timeout <= 0 {
-		c.Timeout = 30 * time.Second // Default to 30 seconds
+		c.Timeout = defaultRemoteTimeout // Default to 30 seconds
 	}
 	if c.MaxRetries < 0 {
-		c.MaxRetries = 3 // Default to 3 retries
+		c.MaxRetries = defaultRemoteMaxRetries // Default to 3 retries
 	}
 	return nil
 }

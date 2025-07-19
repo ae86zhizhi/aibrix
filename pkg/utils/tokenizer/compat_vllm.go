@@ -22,6 +22,12 @@ import (
 	"time"
 )
 
+const (
+	// Default values for VLLMTokenizerConfig
+	defaultVLLMTimeout    = 30 // seconds
+	defaultVLLMMaxRetries = 3
+)
+
 // VLLMTokenizer implements both Tokenizer and ExtendedTokenizer interfaces
 // It acts as a proxy to forward tokenization requests to vLLM server
 // Deprecated: This is a compatibility wrapper. Use NewRemoteTokenizer instead.
@@ -98,10 +104,10 @@ func validateVLLMConfig(c *VLLMTokenizerConfig) error {
 		return ErrInvalidConfig{Message: "BaseURL cannot be empty"}
 	}
 	if c.Timeout <= 0 {
-		c.Timeout = 30 // Default to 30 seconds
+		c.Timeout = defaultVLLMTimeout // Default to 30 seconds
 	}
 	if c.MaxRetries < 0 {
-		c.MaxRetries = 3 // Default to 3 retries
+		c.MaxRetries = defaultVLLMMaxRetries // Default to 3 retries
 	}
 	return nil
 }
