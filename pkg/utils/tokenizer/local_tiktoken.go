@@ -55,4 +55,3 @@ func (s *TiktokenTokenizer) TokenizeInputText(text string) ([]byte, error) {
 	token := tke.Encode(text, nil, nil)
 	return intToByteArray(token), nil
 }
-

@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testHelloWorld = "Hello, world!"
+
 func TestNewTokenizer(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -55,7 +57,7 @@ func TestNewTokenizer(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tokenizer, err := NewTokenizer(tt.tokenizerType, tt.config)
-			
+
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.errContains != "" {
@@ -63,12 +65,12 @@ func TestNewTokenizer(t *testing.T) {
 				}
 				return
 			}
-			
+
 			require.NoError(t, err)
 			require.NotNil(t, tokenizer)
-			
+
 			// Test basic functionality
-			result, err := tokenizer.TokenizeInputText("Hello, world!")
+			result, err := tokenizer.TokenizeInputText(testHelloWorld)
 			require.NoError(t, err)
 			require.NotEmpty(t, result)
 		})
@@ -77,32 +79,32 @@ func TestNewTokenizer(t *testing.T) {
 
 func TestFactoryCompatibility(t *testing.T) {
 	// Test that factory method produces same results as direct constructors
-	
+
 	// Test tiktoken
 	t.Run("tiktoken compatibility", func(t *testing.T) {
 		direct := NewTiktokenTokenizer()
 		factory, err := NewTokenizer("tiktoken", nil)
 		require.NoError(t, err)
-		
-		testText := "Hello, world!"
+
+		testText := testHelloWorld
 		directResult, err1 := direct.TokenizeInputText(testText)
 		factoryResult, err2 := factory.TokenizeInputText(testText)
-		
+
 		require.NoError(t, err1)
 		require.NoError(t, err2)
 		assert.Equal(t, directResult, factoryResult)
 	})
-	
+
 	// Test character
 	t.Run("character compatibility", func(t *testing.T) {
 		direct := NewCharacterTokenizer()
 		factory, err := NewTokenizer("character", nil)
 		require.NoError(t, err)
-		
-		testText := "Hello, world!"
+
+		testText := testHelloWorld
 		directResult, err1 := direct.TokenizeInputText(testText)
 		factoryResult, err2 := factory.TokenizeInputText(testText)
-		
+
 		require.NoError(t, err1)
 		require.NoError(t, err2)
 		assert.Equal(t, directResult, factoryResult)

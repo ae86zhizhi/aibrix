@@ -102,7 +102,9 @@ func TestVLLMTokenizerTokenizeInputText(t *testing.T) {
 			Tokens:      []int{15339, 1919, 999},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -149,7 +151,9 @@ func TestVLLMTokenizerTokenizeWithOptions(t *testing.T) {
 
 		// Check content type to determine request type
 		body := make(map[string]interface{})
-		json.NewDecoder(r.Body).Decode(&body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("Failed to decode request body: %v", err)
+		}
 
 		var resp VLLMTokenizeResponse
 		if _, hasMessages := body["messages"]; hasMessages {
@@ -171,7 +175,9 @@ func TestVLLMTokenizerTokenizeWithOptions(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -254,7 +260,9 @@ func TestVLLMTokenizerDetokenize(t *testing.T) {
 			Prompt: "Hello, world!",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -300,7 +308,9 @@ func TestVLLMTokenizerRetry(t *testing.T) {
 			Tokens:      []int{123},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -336,7 +346,9 @@ func BenchmarkVLLMTokenizerTokenizeInputText(b *testing.B) {
 			Tokens:      []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			b.Errorf("Failed to encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 

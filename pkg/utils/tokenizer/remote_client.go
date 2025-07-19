@@ -26,6 +26,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"k8s.io/klog/v2"
 )
 
 // HTTPClient handles HTTP requests to remote tokenizer services
@@ -100,10 +102,14 @@ func (c *HTTPClient) Post(ctx context.Context, path string, request interface{})
 			lastErr = fmt.Errorf("request failed: %w", err)
 			continue
 		}
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				klog.V(2).InfoS("Failed to close response body", "error", closeErr)
+			}
+		}()
 
 		// Read response body
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
 		if err != nil {
 			lastErr = fmt.Errorf("failed to read response: %w", err)
 			continue
@@ -148,7 +154,11 @@ func (c *HTTPClient) Get(ctx context.Context, path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			klog.V(2).InfoS("Failed to close response body", "error", closeErr)
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

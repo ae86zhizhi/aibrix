@@ -21,6 +21,11 @@ import (
 	"fmt"
 )
 
+const (
+	vllmTokenizePath   = "/tokenize"
+	vllmDetokenizePath = "/detokenize"
+)
+
 // VLLMAdapter implements EngineAdapter for vLLM inference engine
 type VLLMAdapter struct {
 	model string
@@ -35,12 +40,12 @@ func NewVLLMAdapter(model string) *VLLMAdapter {
 
 // GetTokenizePath returns the tokenize endpoint path for vLLM
 func (a *VLLMAdapter) GetTokenizePath() string {
-	return "/tokenize"
+	return vllmTokenizePath
 }
 
 // GetDetokenizePath returns the detokenize endpoint path for vLLM
 func (a *VLLMAdapter) GetDetokenizePath() string {
-	return "/detokenize"
+	return vllmDetokenizePath
 }
 
 // SupportsTokenization returns true as vLLM supports tokenization
