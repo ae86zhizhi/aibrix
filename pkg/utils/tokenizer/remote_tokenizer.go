@@ -18,6 +18,7 @@ package tokenizer
 
 import (
 	"context"
+	"net/url"
 	"time"
 )
 
@@ -41,8 +42,9 @@ func NewRemoteTokenizer(config RemoteTokenizerConfig) (RemoteTokenizer, error) {
 	}
 
 	httpConfig := HTTPClientConfig{
-		Timeout:    config.Timeout,
-		MaxRetries: config.MaxRetries,
+		Timeout:        config.Timeout,
+		MaxRetries:     config.MaxRetries,
+		MaxConcurrency: config.MaxConcurrency,
 	}
 
 	client := NewHTTPClient(config.Endpoint, httpConfig)
@@ -196,11 +198,23 @@ func (t *RemoteTokenizerImpl) Close() error {
 // validateRemoteConfig validates the remote tokenizer configuration
 func validateRemoteConfig(c *RemoteTokenizerConfig) error {
 	if c.Engine == "" {
-		return ErrInvalidConfig{Message: "Engine cannot be empty"}
+		return ErrInvalidConfig{Message: "engine is required"}
 	}
 	if c.Endpoint == "" {
-		return ErrInvalidConfig{Message: "Endpoint cannot be empty"}
+		return ErrInvalidConfig{Message: "endpoint is required"}
 	}
+	
+	// Validate endpoint URL
+	parsedURL, err := url.Parse(c.Endpoint)
+	if err != nil {
+		return ErrInvalidConfig{Message: "invalid endpoint URL: " + err.Error()}
+	}
+	
+	// Check if the URL has a scheme
+	if parsedURL.Scheme == "" {
+		return ErrInvalidConfig{Message: "invalid endpoint URL: missing scheme (http/https)"}
+	}
+	
 	if c.Timeout <= 0 {
 		c.Timeout = 30 * time.Second // Default to 30 seconds
 	}

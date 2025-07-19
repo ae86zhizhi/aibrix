@@ -61,6 +61,7 @@ type RemoteTokenizerConfig struct {
 	Model              string        // Model identifier (optional)
 	Timeout            time.Duration // Request timeout
 	MaxRetries         int           // Max retry attempts
+	MaxConcurrency     int           // Max concurrent requests (default: 1000)
 	AddSpecialTokens   bool          // Default: true
 	ReturnTokenStrings bool          // Default: false
 }
@@ -78,30 +79,31 @@ type VLLMTokenizerConfig struct {
 
 // HTTPClientConfig represents configuration for the HTTP client
 type HTTPClientConfig struct {
-	Timeout    time.Duration
-	MaxRetries int
+	Timeout        time.Duration
+	MaxRetries     int
+	MaxConcurrency int // Maximum concurrent requests (default: 1000)
 }
 
 // VLLMTokenizeCompletionRequest represents a request to tokenize completion text
 type VLLMTokenizeCompletionRequest struct {
-	Model            string  `json:"model,omitempty"`
-	Prompt           string  `json:"prompt"`
-	AddSpecialTokens *bool   `json:"add_special_tokens,omitempty"`
-	ReturnTokenStrs  *bool   `json:"return_token_strs,omitempty"`
+	Model            string `json:"model,omitempty"`
+	Prompt           string `json:"prompt"`
+	AddSpecialTokens *bool  `json:"add_special_tokens,omitempty"`
+	ReturnTokenStrs  *bool  `json:"return_token_strs,omitempty"`
 }
 
 // VLLMTokenizeChatRequest represents a request to tokenize chat messages
 type VLLMTokenizeChatRequest struct {
-	Model                 string                 `json:"model,omitempty"`
-	Messages              []ChatMessage          `json:"messages"`
-	AddSpecialTokens      *bool                  `json:"add_special_tokens,omitempty"`
-	AddGenerationPrompt   *bool                  `json:"add_generation_prompt,omitempty"`
-	ContinueFinalMessage  *bool                  `json:"continue_final_message,omitempty"`
-	ReturnTokenStrs       *bool                  `json:"return_token_strs,omitempty"`
-	ChatTemplate          *string                `json:"chat_template,omitempty"`
-	ChatTemplateKwargs    map[string]interface{} `json:"chat_template_kwargs,omitempty"`
-	Tools                 []interface{}          `json:"tools,omitempty"`
-	MMProcessorKwargs     map[string]interface{} `json:"mm_processor_kwargs,omitempty"`
+	Model                string                 `json:"model,omitempty"`
+	Messages             []ChatMessage          `json:"messages"`
+	AddSpecialTokens     *bool                  `json:"add_special_tokens,omitempty"`
+	AddGenerationPrompt  *bool                  `json:"add_generation_prompt,omitempty"`
+	ContinueFinalMessage *bool                  `json:"continue_final_message,omitempty"`
+	ReturnTokenStrs      *bool                  `json:"return_token_strs,omitempty"`
+	ChatTemplate         *string                `json:"chat_template,omitempty"`
+	ChatTemplateKwargs   map[string]interface{} `json:"chat_template_kwargs,omitempty"`
+	Tools                []interface{}          `json:"tools,omitempty"`
+	MMProcessorKwargs    map[string]interface{} `json:"mm_processor_kwargs,omitempty"`
 }
 
 // VLLMTokenizeResponse represents the response from tokenization endpoints

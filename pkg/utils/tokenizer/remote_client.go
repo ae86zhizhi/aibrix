@@ -33,15 +33,21 @@ type HTTPClient struct {
 	baseURL    string
 	httpClient *http.Client
 	config     HTTPClientConfig
+	semaphore  chan struct{} // Concurrency control semaphore
 }
 
 // NewHTTPClient creates a new HTTP client for remote tokenizer requests
 func NewHTTPClient(baseURL string, config HTTPClientConfig) *HTTPClient {
+	// Set default max concurrency if not specified
+	if config.MaxConcurrency <= 0 {
+		config.MaxConcurrency = 1000 // Default for cluster gateway
+	}
+	
 	// Create HTTP client with connection pooling
 	transport := &http.Transport{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
+		MaxIdleConns:        2000,  // Support many connections as a gateway
+		MaxIdleConnsPerHost: 100,   // Allow many connections per host
+		IdleConnTimeout:     10 * time.Second,  // Quick cleanup of idle connections
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -57,15 +63,27 @@ func NewHTTPClient(baseURL string, config HTTPClientConfig) *HTTPClient {
 		Timeout:   config.Timeout,
 	}
 
+	// Create semaphore for concurrency control
+	semaphore := make(chan struct{}, config.MaxConcurrency)
+
 	return &HTTPClient{
 		baseURL:    baseURL,
 		httpClient: httpClient,
 		config:     config,
+		semaphore:  semaphore,
 	}
 }
 
 // Post sends a POST request with retry logic
 func (c *HTTPClient) Post(ctx context.Context, path string, request interface{}) ([]byte, error) {
+	// Acquire semaphore for concurrency control
+	select {
+	case c.semaphore <- struct{}{}:
+		defer func() { <-c.semaphore }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
 	url := c.baseURL + path
 
 	// Marshal request to JSON
@@ -77,8 +95,10 @@ func (c *HTTPClient) Post(ctx context.Context, path string, request interface{})
 	var lastErr error
 	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
 		if attempt > 0 {
-			// Exponential backoff: 2^attempt * 100ms with max of 5 seconds
-			backoff := time.Duration(math.Min(float64(int(1)<<uint(attempt-1))*100, 5000)) * time.Millisecond
+			// Exponential backoff: 2^(attempt-1) * 100ms with max of 5 seconds
+			shiftedValue := 1 << uint(attempt-1)
+			backoffMs := float64(shiftedValue) * 100
+			backoff := time.Duration(math.Min(backoffMs, 5000)) * time.Millisecond
 			select {
 			case <-time.After(backoff):
 			case <-ctx.Done():
@@ -101,24 +121,34 @@ func (c *HTTPClient) Post(ctx context.Context, path string, request interface{})
 			continue
 		}
 
-		// Read response body
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			lastErr = fmt.Errorf("failed to read response: %w", err)
+		// Process response with proper cleanup
+		body, statusCode, processErr := func() ([]byte, int, error) {
+			defer resp.Body.Close()
+			
+			// Read response body
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return nil, 0, fmt.Errorf("failed to read response: %w", err)
+			}
+			
+			return body, resp.StatusCode, nil
+		}()
+		
+		if processErr != nil {
+			lastErr = processErr
 			continue
 		}
 
 		// Check status code
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if statusCode >= 200 && statusCode < 300 {
 			return body, nil
 		}
 
 		// Handle different error codes
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		if statusCode >= 400 && statusCode < 500 {
 			// Client errors (4xx) - don't retry
 			return nil, ErrHTTPRequest{
-				StatusCode: resp.StatusCode,
+				StatusCode: statusCode,
 				Message:    fmt.Sprintf("client error on %s", path),
 				Body:       string(body),
 			}
@@ -126,7 +156,7 @@ func (c *HTTPClient) Post(ctx context.Context, path string, request interface{})
 
 		// Server errors (5xx) - retry
 		lastErr = ErrHTTPRequest{
-			StatusCode: resp.StatusCode,
+			StatusCode: statusCode,
 			Message:    fmt.Sprintf("server error on %s", path),
 			Body:       string(body),
 		}
@@ -137,6 +167,14 @@ func (c *HTTPClient) Post(ctx context.Context, path string, request interface{})
 
 // Get sends a GET request (useful for health checks)
 func (c *HTTPClient) Get(ctx context.Context, path string) ([]byte, error) {
+	// Acquire semaphore for concurrency control
+	select {
+	case c.semaphore <- struct{}{}:
+		defer func() { <-c.semaphore }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
 	url := c.baseURL + path
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)

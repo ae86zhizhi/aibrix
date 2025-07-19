@@ -24,7 +24,8 @@ import (
 // This file now only contains the backward-compatible NewTokenizer function
 
 // NewTokenizer creates a tokenizer instance based on the provided type
-// Deprecated: Use NewTokenizerFromType for clearer API
+// Supported types: "tiktoken", "character", "vllm", "remote"
+// Config parameter is required for "vllm" and "remote" types
 func NewTokenizer(tokenizerType string, config interface{}) (Tokenizer, error) {
 	switch tokenizerType {
 	case "tiktoken":

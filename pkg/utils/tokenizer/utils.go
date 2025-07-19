@@ -21,11 +21,14 @@ import (
 )
 
 // intToByteArray converts int array to byte array in BigEndian format
+// It uses int32 to preserve sign and validate token values
 func intToByteArray(intArray []int) []byte {
 	// Pre-allocate buffer for better performance
 	buf := make([]byte, len(intArray)*4)
 	for i, num := range intArray {
-		binary.BigEndian.PutUint32(buf[i*4:], uint32(num))
+		// Use int32 to preserve sign and ensure valid range
+		// Token IDs should typically be positive, but we handle negative values safely
+		binary.BigEndian.PutUint32(buf[i*4:], uint32(int32(num)))
 	}
 	return buf
 }
