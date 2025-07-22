@@ -65,7 +65,6 @@ type RemoteTokenizerConfig struct {
 	ReturnTokenStrings bool          // Default: false
 }
 
-
 // vllmTokenizeCompletionRequest represents a request to tokenize completion text
 type vllmTokenizeCompletionRequest struct {
 	Model            string `json:"model,omitempty"`

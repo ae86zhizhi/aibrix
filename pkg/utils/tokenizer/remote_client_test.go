@@ -113,9 +113,13 @@ func TestHTTPClientRetryableStatusCodes(t *testing.T) {
 
 				// Write a response body
 				if tt.statusCode == http.StatusOK {
-					json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+					if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+						t.Logf("Failed to encode response: %v", err)
+					}
 				} else {
-					json.NewEncoder(w).Encode(map[string]string{"error": "test error"})
+					if err := json.NewEncoder(w).Encode(map[string]string{"error": "test error"}); err != nil {
+						t.Logf("Failed to encode response: %v", err)
+					}
 				}
 			}))
 			defer server.Close()
@@ -173,11 +177,15 @@ func TestHTTPClientRetryAfterHeader(t *testing.T) {
 					requestTime = time.Now()
 					w.Header().Set("Retry-After", tt.retryAfter)
 					w.WriteHeader(http.StatusTooManyRequests)
-					json.NewEncoder(w).Encode(map[string]string{"error": "rate limited"})
+					if err := json.NewEncoder(w).Encode(map[string]string{"error": "rate limited"}); err != nil {
+						t.Logf("Failed to encode response: %v", err)
+					}
 				} else {
 					// Second request succeeds
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+					if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+						t.Logf("Failed to encode response: %v", err)
+					}
 				}
 			}))
 			defer server.Close()
@@ -243,7 +251,9 @@ func TestHTTPClientGetMethod(t *testing.T) {
 			// Create test server
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				json.NewEncoder(w).Encode(map[string]string{"status": "test"})
+				if err := json.NewEncoder(w).Encode(map[string]string{"status": "test"}); err != nil {
+					t.Logf("Failed to encode response: %v", err)
+				}
 			}))
 			defer server.Close()
 
@@ -321,7 +331,9 @@ func TestRemoteTokenizerHealthCheck(t *testing.T) {
 			serverResponse: func(w http.ResponseWriter, r *http.Request) {
 				// Verify the request contains empty string
 				var req map[string]interface{}
-				json.NewDecoder(r.Body).Decode(&req)
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Logf("Failed to decode request: %v", err)
+				}
 
 				// Check that prompt is empty string
 				if prompt, ok := req["prompt"].(string); ok && prompt != "" {
@@ -330,10 +342,12 @@ func TestRemoteTokenizerHealthCheck(t *testing.T) {
 
 				// Return successful empty tokenization response
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				if err := json.NewEncoder(w).Encode(map[string]interface{}{
 					"tokens": []int{},
 					"count":  0,
-				})
+				}); err != nil {
+					t.Errorf("Failed to encode response: %v", err)
+				}
 			},
 			expectHealthy: true,
 		},
@@ -341,7 +355,9 @@ func TestRemoteTokenizerHealthCheck(t *testing.T) {
 			name: "unhealthy service returns error",
 			serverResponse: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]string{"error": "service unavailable"})
+				if err := json.NewEncoder(w).Encode(map[string]string{"error": "service unavailable"}); err != nil {
+					t.Logf("Failed to encode response: %v", err)
+				}
 			},
 			expectHealthy: false,
 		},

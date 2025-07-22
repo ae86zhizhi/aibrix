@@ -34,7 +34,6 @@ type extendedTokenizer interface {
 	Detokenize(ctx context.Context, tokens []int) (string, error)
 }
 
-
 // remoteTokenizer interface extends extendedTokenizer with remote-specific methods
 type remoteTokenizer interface {
 	extendedTokenizer

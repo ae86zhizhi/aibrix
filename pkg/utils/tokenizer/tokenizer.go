@@ -35,7 +35,6 @@ func NewTokenizer(tokenizerType string, config interface{}) (Tokenizer, error) {
 		// Character tokenizer doesn't require configuration
 		return NewCharacterTokenizer(), nil
 
-
 	case "remote":
 		// Generic remote tokenizer
 		remoteConfig, ok := config.(RemoteTokenizerConfig)
