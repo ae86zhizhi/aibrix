@@ -19,7 +19,6 @@ This package implements a flexible tokenizer architecture that:
    - `Tokenizer`: Basic tokenization interface
    - `ExtendedTokenizer`: Advanced features including detokenization
    - `RemoteTokenizer`: Remote tokenizer with health checks
-   - `EngineAdapter`: Handles engine-specific differences
    - `TokenizerV2`: Deprecated alias for ExtendedTokenizer
 
 2. **Types** (`types.go`)
@@ -182,6 +181,8 @@ tokenizer/
 
 ### Remote Tokenizers
 
+The package currently supports the following remote tokenizer engines:
+
 1. **vLLM** (`vllm`)
    - Full support for tokenization and detokenization
    - Chat template support
@@ -199,54 +200,6 @@ tokenizer/
    - The adapter is included as a placeholder for future implementation when/if SGLang adds tokenizer endpoints
 
 ## Extending the Package
-
-### Adding a New Engine Adapter
-
-1. Create a new adapter file (e.g., `adapter_myengine.go`):
-
-```go
-package tokenizer
-
-type MyEngineAdapter struct {
-    model string
-}
-
-func NewMyEngineAdapter(model string) *MyEngineAdapter {
-    return &MyEngineAdapter{model: model}
-}
-
-func (a *MyEngineAdapter) GetTokenizePath() string {
-    return "/my/tokenize/path"
-}
-
-func (a *MyEngineAdapter) SupportsTokenization() bool {
-    return true
-}
-
-func (a *MyEngineAdapter) PrepareTokenizeRequest(input TokenizeInput) (interface{}, error) {
-    // Convert TokenizeInput to engine-specific request
-}
-
-func (a *MyEngineAdapter) ParseTokenizeResponse(data []byte) (*TokenizeResult, error) {
-    // Parse engine-specific response to TokenizeResult
-}
-
-// ... implement other EngineAdapter methods
-```
-
-2. Register in adapter factory (`adapter_factory.go`):
-
-```go
-func NewEngineAdapter(engine string, model string) (EngineAdapter, error) {
-    switch engine {
-    // ... existing cases
-    case "myengine":
-        return NewMyEngineAdapter(model), nil
-    default:
-        return nil, fmt.Errorf("unsupported engine: %s", engine)
-    }
-}
-```
 
 ### Adding a New Local Tokenizer
 
@@ -373,7 +326,11 @@ if err != nil {
 ## Performance Considerations
 
 1. **Connection Pooling**: The HTTP client uses connection pooling for better performance
-2. **Retry Logic**: Automatic retry with exponential backoff for transient failures
+2. **Retry Logic**: 
+   - Automatic retry with exponential backoff for transient failures
+   - Respects `Retry-After` header for rate-limited requests (HTTP 429)
+   - Configurable retry attempts with smart status code handling
+   - Only retries on specific status codes (408, 429, 500, 502, 503, 504)
 3. **Timeout Configuration**: Configure appropriate timeouts based on your use case
 4. **Local vs Remote**: Local tokenizers are faster but may not match model's exact tokenization
 
