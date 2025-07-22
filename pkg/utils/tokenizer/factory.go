@@ -18,10 +18,10 @@ package tokenizer
 
 // NewTiktokenTokenizer creates a new tiktoken tokenizer instance
 func NewTiktokenTokenizer() Tokenizer {
-	return &TiktokenTokenizer{}
+	return &tiktokenTokenizer{}
 }
 
 // NewCharacterTokenizer creates a new character tokenizer instance
 func NewCharacterTokenizer() Tokenizer {
-	return &CharacterTokenizer{}
+	return &characterTokenizer{}
 }

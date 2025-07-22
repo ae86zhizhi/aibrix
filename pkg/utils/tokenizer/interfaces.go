@@ -46,8 +46,8 @@ type RemoteTokenizer interface {
 	Close() error
 }
 
-// EngineAdapter handles engine-specific differences for remote tokenizers
-type EngineAdapter interface {
+// engineAdapter handles engine-specific differences for remote tokenizers
+type engineAdapter interface {
 	// Request preparation
 	PrepareTokenizeRequest(input TokenizeInput) (interface{}, error)
 	PrepareDetokenizeRequest(tokens []int) (interface{}, error)

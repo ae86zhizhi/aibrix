@@ -30,15 +30,16 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// HTTPClient handles HTTP requests to remote tokenizer services
-type HTTPClient struct {
+// httpClient handles HTTP requests to remote tokenizer services
+type httpClient struct {
 	baseURL    string
 	httpClient *http.Client
-	config     HTTPClientConfig
+	timeout    time.Duration
+	maxRetries int
 }
 
-// NewHTTPClient creates a new HTTP client for remote tokenizer requests
-func NewHTTPClient(baseURL string, config HTTPClientConfig) *HTTPClient {
+// newHTTPClient creates a new HTTP client for remote tokenizer requests
+func newHTTPClient(baseURL string, timeout time.Duration, maxRetries int) *httpClient {
 	// Create HTTP client with connection pooling
 	transport := &http.Transport{
 		MaxIdleConns:        100,
@@ -54,20 +55,21 @@ func NewHTTPClient(baseURL string, config HTTPClientConfig) *HTTPClient {
 		DisableCompression:    true,
 	}
 
-	httpClient := &http.Client{
+	client := &http.Client{
 		Transport: transport,
-		Timeout:   config.Timeout,
+		Timeout:   timeout,
 	}
 
-	return &HTTPClient{
+	return &httpClient{
 		baseURL:    baseURL,
-		httpClient: httpClient,
-		config:     config,
+		httpClient: client,
+		timeout:    timeout,
+		maxRetries: maxRetries,
 	}
 }
 
 // Post sends a POST request with retry logic
-func (c *HTTPClient) Post(ctx context.Context, path string, request interface{}) ([]byte, error) {
+func (c *httpClient) Post(ctx context.Context, path string, request interface{}) ([]byte, error) {
 	url := c.baseURL + path
 
 	// Marshal request to JSON
@@ -77,7 +79,7 @@ func (c *HTTPClient) Post(ctx context.Context, path string, request interface{})
 	}
 
 	var lastErr error
-	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
 			// Exponential backoff: 2^attempt * 100ms with max of 5 seconds
 			backoff := time.Duration(math.Min(float64(int(1)<<uint(attempt-1))*100, 5000)) * time.Millisecond
@@ -138,11 +140,11 @@ func (c *HTTPClient) Post(ctx context.Context, path string, request interface{})
 		}
 	}
 
-	return nil, fmt.Errorf("request failed after %d attempts: %w", c.config.MaxRetries+1, lastErr)
+	return nil, fmt.Errorf("request failed after %d attempts: %w", c.maxRetries+1, lastErr)
 }
 
 // Get sends a GET request (useful for health checks)
-func (c *HTTPClient) Get(ctx context.Context, path string) ([]byte, error) {
+func (c *httpClient) Get(ctx context.Context, path string) ([]byte, error) {
 	url := c.baseURL + path
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -177,6 +179,6 @@ func (c *HTTPClient) Get(ctx context.Context, path string) ([]byte, error) {
 }
 
 // Close closes the HTTP client connections
-func (c *HTTPClient) Close() {
+func (c *httpClient) Close() {
 	c.httpClient.CloseIdleConnections()
 }

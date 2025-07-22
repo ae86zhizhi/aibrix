@@ -32,8 +32,8 @@ var (
 	tiktokenEncoderErr  error
 )
 
-// TiktokenTokenizer implements local tokenization using tiktoken
-type TiktokenTokenizer struct{}
+// tiktokenTokenizer implements local tokenization using tiktoken
+type tiktokenTokenizer struct{}
 
 // initEncoder initializes the tiktoken encoder once
 func initEncoder() (*tiktoken.Tiktoken, error) {
@@ -45,7 +45,7 @@ func initEncoder() (*tiktoken.Tiktoken, error) {
 	return tiktokenEncoder, tiktokenEncoderErr
 }
 
-func (s *TiktokenTokenizer) TokenizeInputText(text string) ([]byte, error) {
+func (s *tiktokenTokenizer) TokenizeInputText(text string) ([]byte, error) {
 	tke, err := initEncoder()
 	if err != nil {
 		return nil, err

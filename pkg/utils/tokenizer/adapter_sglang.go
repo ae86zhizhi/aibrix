@@ -16,46 +16,46 @@ limitations under the License.
 
 package tokenizer
 
-// SGLangAdapter implements EngineAdapter for SGLang inference engine
+// sglangAdapter implements engineAdapter for SGLang inference engine
 // Note: SGLang does not provide tokenize/detokenize endpoints
-type SGLangAdapter struct {
+type sglangAdapter struct {
 	model string
 }
 
-// NewSGLangAdapter creates a new SGLang adapter
-func NewSGLangAdapter(model string) *SGLangAdapter {
-	return &SGLangAdapter{
+// newSGLangAdapter creates a new SGLang adapter
+func newSGLangAdapter(model string) *sglangAdapter {
+	return &sglangAdapter{
 		model: model,
 	}
 }
 
 // GetTokenizePath returns empty as SGLang doesn't support tokenization
-func (a *SGLangAdapter) GetTokenizePath() string {
+func (a *sglangAdapter) GetTokenizePath() string {
 	return ""
 }
 
 // GetDetokenizePath returns empty as SGLang doesn't support detokenization
-func (a *SGLangAdapter) GetDetokenizePath() string {
+func (a *sglangAdapter) GetDetokenizePath() string {
 	return ""
 }
 
 // SupportsTokenization returns false as SGLang doesn't support tokenization
-func (a *SGLangAdapter) SupportsTokenization() bool {
+func (a *sglangAdapter) SupportsTokenization() bool {
 	return false
 }
 
 // SupportsDetokenization returns false as SGLang doesn't support detokenization
-func (a *SGLangAdapter) SupportsDetokenization() bool {
+func (a *sglangAdapter) SupportsDetokenization() bool {
 	return false
 }
 
 // SupportsChat returns false as SGLang doesn't support chat tokenization
-func (a *SGLangAdapter) SupportsChat() bool {
+func (a *sglangAdapter) SupportsChat() bool {
 	return false
 }
 
 // PrepareTokenizeRequest is not supported by SGLang
-func (a *SGLangAdapter) PrepareTokenizeRequest(input TokenizeInput) (interface{}, error) {
+func (a *sglangAdapter) PrepareTokenizeRequest(input TokenizeInput) (interface{}, error) {
 	return nil, ErrUnsupportedOperation{
 		Engine:    "sglang",
 		Operation: "tokenization",
@@ -63,7 +63,7 @@ func (a *SGLangAdapter) PrepareTokenizeRequest(input TokenizeInput) (interface{}
 }
 
 // PrepareDetokenizeRequest is not supported by SGLang
-func (a *SGLangAdapter) PrepareDetokenizeRequest(tokens []int) (interface{}, error) {
+func (a *sglangAdapter) PrepareDetokenizeRequest(tokens []int) (interface{}, error) {
 	return nil, ErrUnsupportedOperation{
 		Engine:    "sglang",
 		Operation: "detokenization",
@@ -71,7 +71,7 @@ func (a *SGLangAdapter) PrepareDetokenizeRequest(tokens []int) (interface{}, err
 }
 
 // ParseTokenizeResponse is not supported by SGLang
-func (a *SGLangAdapter) ParseTokenizeResponse(data []byte) (*TokenizeResult, error) {
+func (a *sglangAdapter) ParseTokenizeResponse(data []byte) (*TokenizeResult, error) {
 	return nil, ErrUnsupportedOperation{
 		Engine:    "sglang",
 		Operation: "tokenize response parsing",
@@ -79,7 +79,7 @@ func (a *SGLangAdapter) ParseTokenizeResponse(data []byte) (*TokenizeResult, err
 }
 
 // ParseDetokenizeResponse is not supported by SGLang
-func (a *SGLangAdapter) ParseDetokenizeResponse(data []byte) (string, error) {
+func (a *sglangAdapter) ParseDetokenizeResponse(data []byte) (string, error) {
 	return "", ErrUnsupportedOperation{
 		Engine:    "sglang",
 		Operation: "detokenize response parsing",

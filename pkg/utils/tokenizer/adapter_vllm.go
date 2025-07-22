@@ -26,48 +26,48 @@ const (
 	vllmDetokenizePath = "/detokenize"
 )
 
-// VLLMAdapter implements EngineAdapter for vLLM inference engine
-type VLLMAdapter struct {
+// vllmAdapter implements engineAdapter for vLLM inference engine
+type vllmAdapter struct {
 	model string
 }
 
-// NewVLLMAdapter creates a new vLLM adapter
-func NewVLLMAdapter(model string) *VLLMAdapter {
-	return &VLLMAdapter{
+// newVLLMAdapter creates a new vLLM adapter
+func newVLLMAdapter(model string) *vllmAdapter {
+	return &vllmAdapter{
 		model: model,
 	}
 }
 
 // GetTokenizePath returns the tokenize endpoint path for vLLM
-func (va *VLLMAdapter) GetTokenizePath() string {
+func (va *vllmAdapter) GetTokenizePath() string {
 	return vllmTokenizePath
 }
 
 // GetDetokenizePath returns the detokenize endpoint path for vLLM
-func (va *VLLMAdapter) GetDetokenizePath() string {
+func (va *vllmAdapter) GetDetokenizePath() string {
 	return vllmDetokenizePath
 }
 
 // SupportsTokenization returns true as vLLM supports tokenization
-func (va *VLLMAdapter) SupportsTokenization() bool {
+func (va *vllmAdapter) SupportsTokenization() bool {
 	return true
 }
 
 // SupportsDetokenization returns true as vLLM supports detokenization
-func (va *VLLMAdapter) SupportsDetokenization() bool {
+func (va *vllmAdapter) SupportsDetokenization() bool {
 	return true
 }
 
 // SupportsChat returns true as vLLM supports chat tokenization
-func (va *VLLMAdapter) SupportsChat() bool {
+func (va *vllmAdapter) SupportsChat() bool {
 	return true
 }
 
 // PrepareTokenizeRequest prepares a tokenize request for vLLM
-func (va *VLLMAdapter) PrepareTokenizeRequest(input TokenizeInput) (interface{}, error) {
+func (va *vllmAdapter) PrepareTokenizeRequest(input TokenizeInput) (interface{}, error) {
 	switch input.Type {
 	case CompletionInput:
-		req := &VLLMTokenizeCompletionRequest{
+		req := &vllmTokenizeCompletionRequest{
 			Prompt:           input.Text,
 			AddSpecialTokens: &input.AddSpecialTokens,
 			ReturnTokenStrs:  &input.ReturnTokenStrings,
@@ -78,7 +78,7 @@ func (va *VLLMAdapter) PrepareTokenizeRequest(input TokenizeInput) (interface{},
 		return req, nil
 
 	case ChatInput:
-		req := &VLLMTokenizeChatRequest{
+		req := &vllmTokenizeChatRequest{
 			Messages:            input.Messages,
 			AddSpecialTokens:    &input.AddSpecialTokens,
 			AddGenerationPrompt: &input.AddGenerationPrompt,
@@ -95,8 +95,8 @@ func (va *VLLMAdapter) PrepareTokenizeRequest(input TokenizeInput) (interface{},
 }
 
 // PrepareDetokenizeRequest prepares a detokenize request for vLLM
-func (va *VLLMAdapter) PrepareDetokenizeRequest(tokens []int) (interface{}, error) {
-	req := &VLLMDetokenizeRequest{
+func (va *vllmAdapter) PrepareDetokenizeRequest(tokens []int) (interface{}, error) {
+	req := &vllmDetokenizeRequest{
 		Tokens: tokens,
 	}
 	if va.model != "" {
@@ -106,8 +106,8 @@ func (va *VLLMAdapter) PrepareDetokenizeRequest(tokens []int) (interface{}, erro
 }
 
 // ParseTokenizeResponse parses a vLLM tokenize response
-func (va *VLLMAdapter) ParseTokenizeResponse(data []byte) (*TokenizeResult, error) {
-	var resp VLLMTokenizeResponse
+func (va *vllmAdapter) ParseTokenizeResponse(data []byte) (*TokenizeResult, error) {
+	var resp vllmTokenizeResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return nil, fmt.Errorf("failed to parse tokenize response: %w", err)
 	}
@@ -121,8 +121,8 @@ func (va *VLLMAdapter) ParseTokenizeResponse(data []byte) (*TokenizeResult, erro
 }
 
 // ParseDetokenizeResponse parses a vLLM detokenize response
-func (va *VLLMAdapter) ParseDetokenizeResponse(data []byte) (string, error) {
-	var resp VLLMDetokenizeResponse
+func (va *vllmAdapter) ParseDetokenizeResponse(data []byte) (string, error) {
+	var resp vllmDetokenizeResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return "", fmt.Errorf("failed to parse detokenize response: %w", err)
 	}

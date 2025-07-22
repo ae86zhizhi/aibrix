@@ -85,7 +85,7 @@ func TestVLLMTokenizerTokenizeInputText(t *testing.T) {
 		}
 
 		// Decode request
-		var req VLLMTokenizeCompletionRequest
+		var req vllmTokenizeCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("Failed to decode request: %v", err)
 		}
@@ -96,7 +96,7 @@ func TestVLLMTokenizerTokenizeInputText(t *testing.T) {
 		}
 
 		// Send response
-		resp := VLLMTokenizeResponse{
+		resp := vllmTokenizeResponse{
 			Count:       3,
 			MaxModelLen: 4096,
 			Tokens:      []int{15339, 1919, 999},
@@ -155,10 +155,10 @@ func TestVLLMTokenizerTokenizeWithOptions(t *testing.T) {
 			t.Errorf("Failed to decode request body: %v", err)
 		}
 
-		var resp VLLMTokenizeResponse
+		var resp vllmTokenizeResponse
 		if _, hasMessages := body["messages"]; hasMessages {
 			// Chat request
-			resp = VLLMTokenizeResponse{
+			resp = vllmTokenizeResponse{
 				Count:       5,
 				MaxModelLen: 4096,
 				Tokens:      []int{1, 2, 3, 4, 5},
@@ -166,7 +166,7 @@ func TestVLLMTokenizerTokenizeWithOptions(t *testing.T) {
 			}
 		} else {
 			// Completion request
-			resp = VLLMTokenizeResponse{
+			resp = vllmTokenizeResponse{
 				Count:       3,
 				MaxModelLen: 4096,
 				Tokens:      []int{15339, 1919, 999},
@@ -250,13 +250,13 @@ func TestVLLMTokenizerDetokenize(t *testing.T) {
 		}
 
 		// Decode request
-		var req VLLMDetokenizeRequest
+		var req vllmDetokenizeRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("Failed to decode request: %v", err)
 		}
 
 		// Send response
-		resp := VLLMDetokenizeResponse{
+		resp := vllmDetokenizeResponse{
 			Prompt: "Hello, world!",
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -302,7 +302,7 @@ func TestVLLMTokenizerRetry(t *testing.T) {
 		}
 
 		// Success on third attempt
-		resp := VLLMTokenizeResponse{
+		resp := vllmTokenizeResponse{
 			Count:       1,
 			MaxModelLen: 4096,
 			Tokens:      []int{123},
@@ -340,7 +340,7 @@ func TestVLLMTokenizerRetry(t *testing.T) {
 func BenchmarkVLLMTokenizerTokenizeInputText(b *testing.B) {
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := VLLMTokenizeResponse{
+		resp := vllmTokenizeResponse{
 			Count:       10,
 			MaxModelLen: 4096,
 			Tokens:      []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},

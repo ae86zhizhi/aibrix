@@ -27,11 +27,11 @@ const (
 	defaultRemoteMaxRetries = 3
 )
 
-// RemoteTokenizerImpl implements the RemoteTokenizer interface
-type RemoteTokenizerImpl struct {
+// remoteTokenizerImpl implements the RemoteTokenizer interface
+type remoteTokenizerImpl struct {
 	config  RemoteTokenizerConfig
-	client  *HTTPClient
-	adapter EngineAdapter
+	client  *httpClient
+	adapter engineAdapter
 }
 
 // NewRemoteTokenizer creates a new remote tokenizer instance
@@ -41,19 +41,14 @@ func NewRemoteTokenizer(config RemoteTokenizerConfig) (RemoteTokenizer, error) {
 	}
 
 	// Create engine adapter
-	adapter, err := NewEngineAdapter(config.Engine, config.Model)
+	adapter, err := newEngineAdapter(config.Engine, config.Model)
 	if err != nil {
 		return nil, err
 	}
 
-	httpConfig := HTTPClientConfig{
-		Timeout:    config.Timeout,
-		MaxRetries: config.MaxRetries,
-	}
+	client := newHTTPClient(config.Endpoint, config.Timeout, config.MaxRetries)
 
-	client := NewHTTPClient(config.Endpoint, httpConfig)
-
-	return &RemoteTokenizerImpl{
+	return &remoteTokenizerImpl{
 		config:  config,
 		client:  client,
 		adapter: adapter,
@@ -61,7 +56,7 @@ func NewRemoteTokenizer(config RemoteTokenizerConfig) (RemoteTokenizer, error) {
 }
 
 // TokenizeInputText implements the basic Tokenizer interface for backward compatibility
-func (t *RemoteTokenizerImpl) TokenizeInputText(text string) ([]byte, error) {
+func (t *remoteTokenizerImpl) TokenizeInputText(text string) ([]byte, error) {
 	if !t.adapter.SupportsTokenization() {
 		return nil, ErrUnsupportedOperation{
 			Engine:    t.config.Engine,
@@ -86,7 +81,7 @@ func (t *RemoteTokenizerImpl) TokenizeInputText(text string) ([]byte, error) {
 }
 
 // TokenizeWithOptions performs tokenization with advanced options
-func (t *RemoteTokenizerImpl) TokenizeWithOptions(ctx context.Context, input TokenizeInput) (*TokenizeResult, error) {
+func (t *remoteTokenizerImpl) TokenizeWithOptions(ctx context.Context, input TokenizeInput) (*TokenizeResult, error) {
 	if !t.adapter.SupportsTokenization() {
 		return nil, ErrUnsupportedOperation{
 			Engine:    t.config.Engine,
@@ -134,7 +129,7 @@ func (t *RemoteTokenizerImpl) TokenizeWithOptions(ctx context.Context, input Tok
 }
 
 // Detokenize converts tokens back to text
-func (t *RemoteTokenizerImpl) Detokenize(ctx context.Context, tokens []int) (string, error) {
+func (t *remoteTokenizerImpl) Detokenize(ctx context.Context, tokens []int) (string, error) {
 	if !t.adapter.SupportsDetokenization() {
 		return "", ErrUnsupportedOperation{
 			Engine:    t.config.Engine,
@@ -174,12 +169,12 @@ func (t *RemoteTokenizerImpl) Detokenize(ctx context.Context, tokens []int) (str
 }
 
 // GetEndpoint returns the endpoint URL of the remote tokenizer
-func (t *RemoteTokenizerImpl) GetEndpoint() string {
+func (t *remoteTokenizerImpl) GetEndpoint() string {
 	return t.config.Endpoint
 }
 
 // IsHealthy checks if the remote tokenizer service is healthy
-func (t *RemoteTokenizerImpl) IsHealthy(ctx context.Context) bool {
+func (t *remoteTokenizerImpl) IsHealthy(ctx context.Context) bool {
 	// Simple health check by attempting a minimal tokenization
 	testInput := TokenizeInput{
 		Type:             CompletionInput,
@@ -192,7 +187,7 @@ func (t *RemoteTokenizerImpl) IsHealthy(ctx context.Context) bool {
 }
 
 // Close closes the HTTP client connections
-func (t *RemoteTokenizerImpl) Close() error {
+func (t *remoteTokenizerImpl) Close() error {
 	if t.client != nil {
 		t.client.Close()
 	}
@@ -216,5 +211,5 @@ func validateRemoteConfig(c *RemoteTokenizerConfig) error {
 	return nil
 }
 
-// Ensure RemoteTokenizerImpl implements RemoteTokenizer interface
-var _ RemoteTokenizer = (*RemoteTokenizerImpl)(nil)
+// Ensure remoteTokenizerImpl implements RemoteTokenizer interface
+var _ RemoteTokenizer = (*remoteTokenizerImpl)(nil)

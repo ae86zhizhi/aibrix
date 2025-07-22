@@ -18,13 +18,13 @@ package tokenizer
 
 import "fmt"
 
-// NewEngineAdapter creates an appropriate EngineAdapter based on the engine type
-func NewEngineAdapter(engine string, model string) (EngineAdapter, error) {
+// newEngineAdapter creates an appropriate engineAdapter based on the engine type
+func newEngineAdapter(engine string, model string) (engineAdapter, error) {
 	switch engine {
 	case "vllm":
-		return NewVLLMAdapter(model), nil
+		return newVLLMAdapter(model), nil
 	case "sglang":
-		return NewSGLangAdapter(model), nil
+		return newSGLangAdapter(model), nil
 	default:
 		return nil, fmt.Errorf("unsupported engine: %s", engine)
 	}

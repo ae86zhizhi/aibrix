@@ -76,22 +76,17 @@ type VLLMTokenizerConfig struct {
 	ReturnTokenStrings bool   // Default value for returning token strings
 }
 
-// HTTPClientConfig represents configuration for the HTTP client
-type HTTPClientConfig struct {
-	Timeout    time.Duration
-	MaxRetries int
-}
 
-// VLLMTokenizeCompletionRequest represents a request to tokenize completion text
-type VLLMTokenizeCompletionRequest struct {
+// vllmTokenizeCompletionRequest represents a request to tokenize completion text
+type vllmTokenizeCompletionRequest struct {
 	Model            string `json:"model,omitempty"`
 	Prompt           string `json:"prompt"`
 	AddSpecialTokens *bool  `json:"add_special_tokens,omitempty"`
 	ReturnTokenStrs  *bool  `json:"return_token_strs,omitempty"`
 }
 
-// VLLMTokenizeChatRequest represents a request to tokenize chat messages
-type VLLMTokenizeChatRequest struct {
+// vllmTokenizeChatRequest represents a request to tokenize chat messages
+type vllmTokenizeChatRequest struct {
 	Model                string                 `json:"model,omitempty"`
 	Messages             []ChatMessage          `json:"messages"`
 	AddSpecialTokens     *bool                  `json:"add_special_tokens,omitempty"`
@@ -104,21 +99,21 @@ type VLLMTokenizeChatRequest struct {
 	MMProcessorKwargs    map[string]interface{} `json:"mm_processor_kwargs,omitempty"`
 }
 
-// VLLMTokenizeResponse represents the response from tokenization endpoints
-type VLLMTokenizeResponse struct {
+// vllmTokenizeResponse represents the response from tokenization endpoints
+type vllmTokenizeResponse struct {
 	Count       int      `json:"count"`
 	MaxModelLen int      `json:"max_model_len"`
 	Tokens      []int    `json:"tokens"`
 	TokenStrs   []string `json:"token_strs,omitempty"`
 }
 
-// VLLMDetokenizeRequest represents a request to detokenize tokens
-type VLLMDetokenizeRequest struct {
+// vllmDetokenizeRequest represents a request to detokenize tokens
+type vllmDetokenizeRequest struct {
 	Model  string `json:"model,omitempty"`
 	Tokens []int  `json:"tokens"`
 }
 
-// VLLMDetokenizeResponse represents the response from detokenization endpoint
-type VLLMDetokenizeResponse struct {
+// vllmDetokenizeResponse represents the response from detokenization endpoint
+type vllmDetokenizeResponse struct {
 	Prompt string `json:"prompt"`
 }
