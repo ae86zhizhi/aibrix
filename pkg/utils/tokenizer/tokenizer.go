@@ -35,13 +35,6 @@ func NewTokenizer(tokenizerType string, config interface{}) (Tokenizer, error) {
 		// Character tokenizer doesn't require configuration
 		return NewCharacterTokenizer(), nil
 
-	case "vllm":
-		// For backward compatibility, use VLLMTokenizer
-		vllmConfig, ok := config.(VLLMTokenizerConfig)
-		if !ok {
-			return nil, fmt.Errorf("invalid config type for vLLM tokenizer")
-		}
-		return NewVLLMTokenizer(vllmConfig)
 
 	case "remote":
 		// Generic remote tokenizer

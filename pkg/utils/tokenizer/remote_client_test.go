@@ -29,12 +29,12 @@ import (
 // TestHTTPClientRetryableStatusCodes tests the retry logic for different status codes
 func TestHTTPClientRetryableStatusCodes(t *testing.T) {
 	tests := []struct {
-		name           string
-		statusCode     int
-		expectedRetry  bool
-		expectedCalls  int
-		retryAfter     string
-		wantErr        bool
+		name          string
+		statusCode    int
+		expectedRetry bool
+		expectedCalls int
+		retryAfter    string
+		wantErr       bool
 	}{
 		{
 			name:          "200 OK - no retry",
@@ -110,7 +110,7 @@ func TestHTTPClientRetryableStatusCodes(t *testing.T) {
 
 				// Return the test status code
 				w.WriteHeader(tt.statusCode)
-				
+
 				// Write a response body
 				if tt.statusCode == http.StatusOK {
 					json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -198,7 +198,7 @@ func TestHTTPClientRetryAfterHeader(t *testing.T) {
 
 			// Check that we waited approximately the right amount of time
 			if duration < tt.minExpectedWait || duration > tt.maxExpectedWait {
-				t.Errorf("Expected wait between %v and %v, got %v", 
+				t.Errorf("Expected wait between %v and %v, got %v",
 					tt.minExpectedWait, tt.maxExpectedWait, duration)
 			}
 		})
@@ -322,12 +322,12 @@ func TestRemoteTokenizerHealthCheck(t *testing.T) {
 				// Verify the request contains empty string
 				var req map[string]interface{}
 				json.NewDecoder(r.Body).Decode(&req)
-				
+
 				// Check that prompt is empty string
 				if prompt, ok := req["prompt"].(string); ok && prompt != "" {
 					t.Errorf("Expected empty prompt, got: %s", prompt)
 				}
-				
+
 				// Return successful empty tokenization response
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(map[string]interface{}{
@@ -373,7 +373,7 @@ func TestRemoteTokenizerHealthCheck(t *testing.T) {
 			// Test health check
 			ctx := context.Background()
 			healthy := tokenizer.IsHealthy(ctx)
-			
+
 			if healthy != tt.expectHealthy {
 				t.Errorf("IsHealthy() = %v, want %v", healthy, tt.expectHealthy)
 			}
@@ -383,6 +383,6 @@ func TestRemoteTokenizerHealthCheck(t *testing.T) {
 
 // Helper function
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[:len(substr)] == substr || 
+	return len(s) >= len(substr) && s[:len(substr)] == substr ||
 		len(s) > len(substr) && contains(s[1:], substr)
 }

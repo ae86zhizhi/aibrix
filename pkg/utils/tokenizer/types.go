@@ -65,16 +65,6 @@ type RemoteTokenizerConfig struct {
 	ReturnTokenStrings bool          // Default: false
 }
 
-// VLLMTokenizerConfig represents configuration for the vLLM tokenizer
-// Deprecated: Use RemoteTokenizerConfig with Engine="vllm" instead
-type VLLMTokenizerConfig struct {
-	BaseURL            string // vLLM server base URL
-	Model              string // Model name (optional)
-	Timeout            int    // Request timeout in seconds
-	MaxRetries         int    // Maximum number of retry attempts
-	AddSpecialTokens   bool   // Default value for add_special_tokens
-	ReturnTokenStrings bool   // Default value for returning token strings
-}
 
 // vllmTokenizeCompletionRequest represents a request to tokenize completion text
 type vllmTokenizeCompletionRequest struct {
