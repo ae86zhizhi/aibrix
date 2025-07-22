@@ -18,6 +18,7 @@ package tokenizer
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -41,9 +42,14 @@ func NewRemoteTokenizer(config RemoteTokenizerConfig) (RemoteTokenizer, error) {
 	}
 
 	// Create engine adapter
-	adapter, err := newEngineAdapter(config.Engine, config.Model)
-	if err != nil {
-		return nil, err
+	var adapter engineAdapter
+	switch config.Engine {
+	case "vllm":
+		adapter = newVLLMAdapter(config.Model)
+	case "sglang":
+		adapter = newSGLangAdapter(config.Model)
+	default:
+		return nil, fmt.Errorf("unsupported engine: %s", config.Engine)
 	}
 
 	client := newHTTPClient(config.Endpoint, config.Timeout, config.MaxRetries)

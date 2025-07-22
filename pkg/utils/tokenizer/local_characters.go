@@ -26,3 +26,8 @@ func (s *characterTokenizer) TokenizeInputText(text string) ([]byte, error) {
 	// TODO: evaluate if text conversion can be done to []rune and then convert []rune to []byte with minimal overhead.
 	return []byte(text), nil
 }
+
+// NewCharacterTokenizer creates a new character tokenizer instance
+func NewCharacterTokenizer() Tokenizer {
+	return &characterTokenizer{}
+}
