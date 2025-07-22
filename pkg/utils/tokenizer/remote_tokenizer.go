@@ -175,10 +175,12 @@ func (t *remoteTokenizerImpl) GetEndpoint() string {
 
 // IsHealthy checks if the remote tokenizer service is healthy
 func (t *remoteTokenizerImpl) IsHealthy(ctx context.Context) bool {
-	// Simple health check by attempting a minimal tokenization
+	// Use empty string for minimal health check
+	// With add_special_tokens=false, this returns {"tokens": [], "count": 0}
+	// This approach minimizes processing overhead while still validating service responsiveness
 	testInput := TokenizeInput{
 		Type:             CompletionInput,
-		Text:             "test",
+		Text:             "",
 		AddSpecialTokens: false,
 	}
 

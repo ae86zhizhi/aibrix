@@ -309,6 +309,78 @@ func TestStatusCodeHelpers(t *testing.T) {
 	}
 }
 
+// TestRemoteTokenizerHealthCheck tests the IsHealthy method with empty string
+func TestRemoteTokenizerHealthCheck(t *testing.T) {
+	tests := []struct {
+		name           string
+		serverResponse func(w http.ResponseWriter, r *http.Request)
+		expectHealthy  bool
+	}{
+		{
+			name: "healthy service with empty string",
+			serverResponse: func(w http.ResponseWriter, r *http.Request) {
+				// Verify the request contains empty string
+				var req map[string]interface{}
+				json.NewDecoder(r.Body).Decode(&req)
+				
+				// Check that prompt is empty string
+				if prompt, ok := req["prompt"].(string); ok && prompt != "" {
+					t.Errorf("Expected empty prompt, got: %s", prompt)
+				}
+				
+				// Return successful empty tokenization response
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"tokens": []int{},
+					"count":  0,
+				})
+			},
+			expectHealthy: true,
+		},
+		{
+			name: "unhealthy service returns error",
+			serverResponse: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": "service unavailable"})
+			},
+			expectHealthy: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test server
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/tokenize" {
+					tt.serverResponse(w, r)
+				} else {
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+
+			// Create remote tokenizer
+			config := RemoteTokenizerConfig{
+				Engine:   "vllm",
+				Endpoint: server.URL,
+				Timeout:  5 * time.Second,
+			}
+			tokenizer, err := NewRemoteTokenizer(config)
+			if err != nil {
+				t.Fatalf("Failed to create tokenizer: %v", err)
+			}
+
+			// Test health check
+			ctx := context.Background()
+			healthy := tokenizer.IsHealthy(ctx)
+			
+			if healthy != tt.expectHealthy {
+				t.Errorf("IsHealthy() = %v, want %v", healthy, tt.expectHealthy)
+			}
+		})
+	}
+}
+
 // Helper function
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && s[:len(substr)] == substr || 
