@@ -34,9 +34,6 @@ type ExtendedTokenizer interface {
 	Detokenize(ctx context.Context, tokens []int) (string, error)
 }
 
-// TokenizerV2 is an alias for ExtendedTokenizer
-// Deprecated: Use ExtendedTokenizer instead
-type TokenizerV2 = ExtendedTokenizer
 
 // RemoteTokenizer interface extends ExtendedTokenizer with remote-specific methods
 type RemoteTokenizer interface {
