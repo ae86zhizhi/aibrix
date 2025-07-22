@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -90,8 +89,11 @@ func getRetryDelay(resp *http.Response, attempt int) time.Duration {
 
 // calculateBackoff calculates exponential backoff delay
 func calculateBackoff(attempt int) time.Duration {
-	// Exponential backoff: 2^attempt * 100ms with max of 5 seconds
-	delayMs := math.Min(float64(int(1)<<uint(attempt-1))*backoffBaseDelayMs, float64(backoffMaxDelayMs))
+	// Exponential backoff: 2^(attempt-1) * 100ms with max of 5 seconds
+	delayMs := backoffBaseDelayMs << (attempt - 1)
+	if delayMs > backoffMaxDelayMs {
+		delayMs = backoffMaxDelayMs
+	}
 	return time.Duration(delayMs) * time.Millisecond
 }
 
