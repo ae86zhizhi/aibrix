@@ -8,35 +8,28 @@ This package implements a flexible tokenizer architecture that:
 - Provides a common interface for different tokenization backends
 - Supports local tokenizers (tiktoken, character-based)
 - Supports remote tokenizers via HTTP API (vLLM, SGLang, etc.)
-- Maintains backward compatibility with legacy APIs
-- Follows Go idioms with a flattened package structure
+- Follows Go idioms with a minimal public API surface
+- Uses type assertions for advanced features (progressive disclosure pattern)
 
 ## Architecture
 
-### Core Components
+### Core Design Principles
 
-1. **Interfaces** (`interfaces.go`)
-   - `Tokenizer`: Basic tokenization interface
-   - `ExtendedTokenizer`: Advanced features including detokenization
-   - `RemoteTokenizer`: Remote tokenizer with health checks
-   - `TokenizerV2`: Deprecated alias for ExtendedTokenizer
+1. **Minimal Public API**: Only the `Tokenizer` interface is exported
+2. **Progressive Disclosure**: Basic usage is simple, advanced features available via type assertions
+3. **Type Safety**: Compile-time checks with Go's type system
+4. **Extensibility**: Easy to add new tokenizer implementations
 
-2. **Types** (`types.go`)
-   - Common data structures for all tokenizers
-   - Request/response types for different engines
-   - Configuration structures
+### Interface Hierarchy
 
-3. **Implementations**
-   - **Local Tokenizers**:
-     - `local_tiktoken.go`: OpenAI tiktoken implementation
-     - `local_characters.go`: Simple character-based tokenizer
-   - **Remote Tokenizer**:
-     - `remote_tokenizer.go`: Generic remote tokenizer
-     - `remote_client.go`: HTTP client with retry logic
-   - **Engine Adapters**:
-     - `adapter_vllm.go`: vLLM-specific implementation
-     - `adapter_sglang.go`: SGLang adapter (limited support)
-     - `adapter_factory.go`: Adapter creation logic
+```
+Tokenizer (public interface)
+    ├── Local implementations
+    │   ├── TiktokenTokenizer
+    │   └── CharacterTokenizer
+    └── Remote implementation
+        └── remoteTokenizerImpl (supports advanced features internally)
+```
 
 ## Quick Start
 
@@ -53,17 +46,20 @@ tokens, err := tok1.TokenizeInputText("Hello, world!")
 tok2 := tokenizer.NewCharacterTokenizer()
 tokens, err := tok2.TokenizeInputText("Hello, world!")
 
-// Create a remote vLLM tokenizer (backward compatible)
-config := tokenizer.VLLMTokenizerConfig{
-    BaseURL: "http://vllm-service:8000",
-    Model: "meta-llama/Llama-2-7b-hf",
-    Timeout: 30,
+// Create a remote tokenizer
+config := tokenizer.RemoteTokenizerConfig{
+    Engine:   "vllm",
+    Endpoint: "http://vllm-service:8000",
+    Model:    "meta-llama/Llama-2-7b-hf",
+    Timeout:  30 * time.Second,
 }
-tok3, err := tokenizer.NewVLLMTokenizer(config)
+tok3, err := tokenizer.NewRemoteTokenizer(config)
 tokens, err := tok3.TokenizeInputText("Hello, world!")
 ```
 
-### Advanced Usage with Remote Tokenizer
+### Advanced Features with Type Assertions
+
+Since advanced interfaces are not exported, use type assertions to access extended functionality:
 
 ```go
 import (
@@ -72,7 +68,7 @@ import (
     "github.com/vllm-project/aibrix/pkg/utils/tokenizer"
 )
 
-// Create a remote tokenizer with full configuration
+// Create a remote tokenizer
 config := tokenizer.RemoteTokenizerConfig{
     Engine:             "vllm",
     Endpoint:           "http://vllm-service:8000",
@@ -88,49 +84,81 @@ if err != nil {
     log.Fatal(err)
 }
 
-// Use extended features
-ctx := context.Background()
+// Basic tokenization (always available)
+tokens, err := tok.TokenizeInputText("Hello, world!")
 
-// Tokenize with options
-input := tokenizer.TokenizeInput{
-    Type:                tokenizer.CompletionInput,
-    Text:                "Hello, world!",
-    AddSpecialTokens:    true,
-    ReturnTokenStrings:  true,
+// Advanced tokenization features
+if extended, ok := tok.(interface {
+    TokenizeWithOptions(context.Context, tokenizer.TokenizeInput) (*tokenizer.TokenizeResult, error)
+    Detokenize(context.Context, []int) (string, error)
+}); ok {
+    ctx := context.Background()
+    
+    // Tokenize with options
+    input := tokenizer.TokenizeInput{
+        Type:                tokenizer.CompletionInput,
+        Text:                "Hello, world!",
+        AddSpecialTokens:    true,
+        ReturnTokenStrings:  true,
+    }
+    result, err := extended.TokenizeWithOptions(ctx, input)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("Token count: %d\n", result.Count)
+    fmt.Printf("Tokens: %v\n", result.Tokens)
+    fmt.Printf("Token strings: %v\n", result.TokenStrings)
+    
+    // Detokenize
+    text, err := extended.Detokenize(ctx, result.Tokens)
+    fmt.Printf("Detokenized: %s\n", text)
 }
-result, err := tok.TokenizeWithOptions(ctx, input)
-if err != nil {
-    log.Fatal(err)
-}
 
-fmt.Printf("Token count: %d\n", result.Count)
-fmt.Printf("Tokens: %v\n", result.Tokens)
-fmt.Printf("Token strings: %v\n", result.TokenStrings)
-
-// Detokenize
-text, err := tok.Detokenize(ctx, result.Tokens)
-fmt.Printf("Detokenized: %s\n", text)
-
-// Check health
-if tok.IsHealthy(ctx) {
-    fmt.Println("Tokenizer service is healthy")
+// Remote-specific features
+if remote, ok := tok.(interface {
+    IsHealthy(context.Context) bool
+    GetEndpoint() string
+    Close() error
+}); ok {
+    ctx := context.Background()
+    
+    // Check health
+    if remote.IsHealthy(ctx) {
+        fmt.Println("Tokenizer service is healthy")
+    }
+    
+    // Get endpoint
+    fmt.Printf("Using endpoint: %s\n", remote.GetEndpoint())
+    
+    // Clean up
+    defer remote.Close()
 }
 ```
 
 ### Chat Tokenization
 
 ```go
-// Tokenize chat messages
-chatInput := tokenizer.TokenizeInput{
-    Type: tokenizer.ChatInput,
-    Messages: []tokenizer.ChatMessage{
-        {Role: "system", Content: "You are a helpful assistant."},
-        {Role: "user", Content: "What is the weather today?"},
-    },
-    AddGenerationPrompt: true,
+// Chat tokenization requires type assertion to access advanced features
+if extended, ok := tok.(interface {
+    TokenizeWithOptions(context.Context, tokenizer.TokenizeInput) (*tokenizer.TokenizeResult, error)
+}); ok {
+    ctx := context.Background()
+    
+    chatInput := tokenizer.TokenizeInput{
+        Type: tokenizer.ChatInput,
+        Messages: []tokenizer.ChatMessage{
+            {Role: "system", Content: "You are a helpful assistant."},
+            {Role: "user", Content: "What is the weather today?"},
+        },
+        AddGenerationPrompt: true,
+    }
+    
+    result, err := extended.TokenizeWithOptions(ctx, chatInput)
+    if err != nil {
+        log.Fatal(err)
+    }
 }
-
-result, err := tok.TokenizeWithOptions(ctx, chatInput)
 ```
 
 ## File Structure
@@ -138,32 +166,26 @@ result, err := tok.TokenizeWithOptions(ctx, chatInput)
 ```
 tokenizer/
 ├── Core Components
-│   ├── interfaces.go          # Interface definitions
+│   ├── interfaces.go          # Interface definitions (only Tokenizer exported)
 │   ├── types.go              # Type definitions
 │   ├── errors.go             # Error types
-│   ├── factory.go            # Factory methods
-│   └── utils.go              # Shared utilities
+│   ├── utils.go              # Shared utilities
+│   └── tokenizer.go          # Deprecated factory function
 │
 ├── Local Implementations
-│   ├── local_tiktoken.go     # Tiktoken tokenizer
-│   └── local_characters.go   # Character tokenizer
+│   ├── local_tiktoken.go     # Tiktoken tokenizer with constructor
+│   └── local_characters.go   # Character tokenizer with constructor
 │
 ├── Remote Implementation
 │   ├── remote_tokenizer.go   # Generic remote tokenizer
-│   └── remote_client.go      # HTTP client
+│   └── remote_client.go      # HTTP client with retry logic
 │
 ├── Engine Adapters
-│   ├── adapter_factory.go    # Adapter factory
-│   ├── adapter_vllm.go       # vLLM adapter
-│   └── adapter_sglang.go     # SGLang adapter
-│
-├── Compatibility
-│   ├── compat_vllm.go        # Legacy vLLM tokenizer
-│   └── tokenizer.go          # Legacy factory function
+│   ├── adapter_vllm.go       # vLLM adapter (internal)
+│   └── adapter_sglang.go     # SGLang adapter (internal)
 │
 └── Tests
-    ├── vllm_tokenizer_test.go
-    └── factory_test.go
+    └── remote_client_test.go
 ```
 
 ## Supported Tokenizers
@@ -217,33 +239,43 @@ func (t *CustomTokenizer) TokenizeInputText(text string) ([]byte, error) {
     tokens := tokenizeCustom(text) // Your tokenization logic
     return intToByteArray(tokens), nil
 }
-```
 
-2. Add factory method in `factory.go`:
-
-```go
 func NewCustomTokenizer() Tokenizer {
     return &CustomTokenizer{}
 }
 ```
 
+2. The tokenizer automatically implements the `Tokenizer` interface.
+
 ## API Reference
 
-### Core Interfaces
+### Public Interface
 
 #### Tokenizer
+The only exported interface, providing basic tokenization:
+
 ```go
 type Tokenizer interface {
     TokenizeInputText(string) ([]byte, error)
 }
 ```
 
-#### ExtendedTokenizer
+### Advanced Features via Type Assertions
+
+While not exported, advanced features are available through type assertions:
+
 ```go
-type ExtendedTokenizer interface {
-    Tokenizer
+// Extended tokenization features
+interface {
     TokenizeWithOptions(ctx context.Context, input TokenizeInput) (*TokenizeResult, error)
     Detokenize(ctx context.Context, tokens []int) (string, error)
+}
+
+// Remote-specific features
+interface {
+    IsHealthy(ctx context.Context) bool
+    GetEndpoint() string
+    Close() error
 }
 ```
 
@@ -271,6 +303,14 @@ type TokenizeResult struct {
 }
 ```
 
+#### ChatMessage
+```go
+type ChatMessage struct {
+    Role    string // "system", "user", "assistant"
+    Content string // Message content
+}
+```
+
 ## Configuration
 
 ### RemoteTokenizerConfig
@@ -283,18 +323,6 @@ type RemoteTokenizerConfig struct {
     MaxRetries         int          // Retry attempts
     AddSpecialTokens   bool         // Default: true
     ReturnTokenStrings bool         // Default: false
-}
-```
-
-### VLLMTokenizerConfig (Legacy)
-```go
-type VLLMTokenizerConfig struct {
-    BaseURL            string // vLLM server URL
-    Model              string // Model name
-    Timeout            int    // Timeout in seconds
-    MaxRetries         int    // Retry attempts
-    AddSpecialTokens   bool   // Add special tokens
-    ReturnTokenStrings bool   // Return token strings
 }
 ```
 
@@ -345,41 +373,52 @@ The package includes comprehensive tests for:
 - Basic tokenization functionality
 - Remote tokenizer with mock servers
 - Error handling scenarios
-- Backward compatibility
+- Type assertion patterns
 
 ## Migration Guide
 
-### From Legacy VLLMTokenizer to RemoteTokenizer
+### From Deprecated Components
 
+1. **VLLMTokenizer to RemoteTokenizer**:
 ```go
-// Old code
-config := tokenizer.VLLMTokenizerConfig{
-    BaseURL: "http://vllm:8000",
-    Model: "llama2",
-}
-tok, _ := tokenizer.NewVLLMTokenizer(config)
+// Old (no longer supported)
+// config := tokenizer.VLLMTokenizerConfig{...}
+// tok, _ := tokenizer.NewVLLMTokenizer(config)
 
-// New code (recommended)
+// New
 config := tokenizer.RemoteTokenizerConfig{
-    Engine: "vllm",
+    Engine:   "vllm",
     Endpoint: "http://vllm:8000",
-    Model: "llama2",
-    Timeout: 30 * time.Second,
+    Model:    "llama2",
+    Timeout:  30 * time.Second,
 }
 tok, _ := tokenizer.NewRemoteTokenizer(config)
 ```
 
-The legacy API remains fully supported for backward compatibility.
+2. **ExtendedTokenizer/RemoteTokenizer interfaces**:
+```go
+// Old (no longer exported)
+// var tok tokenizer.ExtendedTokenizer
+
+// New - use type assertions
+tok, _ := tokenizer.NewRemoteTokenizer(config)
+if extended, ok := tok.(interface {
+    TokenizeWithOptions(context.Context, tokenizer.TokenizeInput) (*tokenizer.TokenizeResult, error)
+}); ok {
+    // Use extended features
+}
+```
 
 ## Contributing
 
 When contributing to this package:
 
-1. Maintain backward compatibility
+1. Maintain the minimal public API philosophy
 2. Add tests for new features
 3. Update this README for significant changes
 4. Follow Go idioms and conventions
-5. Ensure no circular dependencies
+5. Use type assertions for advanced features
+6. Ensure backward compatibility for the `Tokenizer` interface
 
 ## License
 
