@@ -20,11 +20,11 @@ import (
 	"fmt"
 )
 
-// Factory functions moved to factory.go
-// This file now only contains the backward-compatible NewTokenizer function
+// Package tokenizer provides a unified interface for text tokenization
+// This file contains the main factory function for creating tokenizer instances
 
 // NewTokenizer creates a tokenizer instance based on the provided type
-// Deprecated: Use specific factory functions like NewRemoteTokenizer, NewTiktokenTokenizer, or NewCharacterTokenizer instead
+// Supports "tiktoken", "character", and "remote" tokenizer types
 func NewTokenizer(tokenizerType string, config interface{}) (Tokenizer, error) {
 	switch tokenizerType {
 	case "tiktoken":

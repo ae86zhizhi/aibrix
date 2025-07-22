@@ -38,13 +38,18 @@ Tokenizer (public interface)
 ```go
 import "github.com/vllm-project/aibrix/pkg/utils/tokenizer"
 
-// Create a local tiktoken tokenizer
-tok1 := tokenizer.NewTiktokenTokenizer()
+// Option 1: Using the factory function
+tok1, err := tokenizer.NewTokenizer("tiktoken", nil)
 tokens, err := tok1.TokenizeInputText("Hello, world!")
 
-// Create a character tokenizer
-tok2 := tokenizer.NewCharacterTokenizer()
+// Option 2: Using direct constructors
+// Create a local tiktoken tokenizer
+tok2 := tokenizer.NewTiktokenTokenizer()
 tokens, err := tok2.TokenizeInputText("Hello, world!")
+
+// Create a character tokenizer
+tok3 := tokenizer.NewCharacterTokenizer()
+tokens, err := tok3.TokenizeInputText("Hello, world!")
 
 // Create a remote tokenizer
 config := tokenizer.RemoteTokenizerConfig{
@@ -53,8 +58,12 @@ config := tokenizer.RemoteTokenizerConfig{
     Model:    "meta-llama/Llama-2-7b-hf",
     Timeout:  30 * time.Second,
 }
-tok3, err := tokenizer.NewRemoteTokenizer(config)
-tokens, err := tok3.TokenizeInputText("Hello, world!")
+tok4, err := tokenizer.NewRemoteTokenizer(config)
+tokens, err := tok4.TokenizeInputText("Hello, world!")
+
+// Using factory function for remote tokenizer
+tok5, err := tokenizer.NewTokenizer("remote", config)
+tokens, err := tok5.TokenizeInputText("Hello, world!")
 ```
 
 ### Advanced Features with Type Assertions
@@ -170,7 +179,7 @@ tokenizer/
 │   ├── types.go              # Type definitions
 │   ├── errors.go             # Error types
 │   ├── utils.go              # Shared utilities
-│   └── tokenizer.go          # Deprecated factory function
+│   └── tokenizer.go          # Main factory function
 │
 ├── Local Implementations
 │   ├── local_tiktoken.go     # Tiktoken tokenizer with constructor
@@ -259,6 +268,18 @@ type Tokenizer interface {
     TokenizeInputText(string) ([]byte, error)
 }
 ```
+
+#### Factory Function
+The main factory function for creating tokenizer instances:
+
+```go
+func NewTokenizer(tokenizerType string, config interface{}) (Tokenizer, error)
+```
+
+Supported tokenizer types:
+- `"tiktoken"` - OpenAI's tiktoken tokenizer (config: nil)
+- `"character"` - Simple character-based tokenizer (config: nil) 
+- `"remote"` - Remote tokenizer via HTTP API (config: RemoteTokenizerConfig)
 
 ### Advanced Features via Type Assertions
 
