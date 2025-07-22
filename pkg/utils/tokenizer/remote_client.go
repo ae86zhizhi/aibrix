@@ -25,6 +25,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -36,6 +37,66 @@ type httpClient struct {
 	httpClient *http.Client
 	timeout    time.Duration
 	maxRetries int
+}
+
+// retryableStatusCodes defines which HTTP status codes should trigger a retry
+var retryableStatusCodes = map[int]bool{
+	http.StatusRequestTimeout:      true, // 408
+	http.StatusTooManyRequests:     true, // 429
+	http.StatusInternalServerError: true, // 500
+	http.StatusBadGateway:          true, // 502
+	http.StatusServiceUnavailable:  true, // 503
+	http.StatusGatewayTimeout:      true, // 504
+}
+
+// isRetryable determines if an HTTP response should be retried
+func isRetryable(resp *http.Response) bool {
+	return retryableStatusCodes[resp.StatusCode]
+}
+
+// getRetryDelay calculates the retry delay based on response headers and attempt number
+func getRetryDelay(resp *http.Response, attempt int) time.Duration {
+	// Check for Retry-After header
+	if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
+		// Try to parse as seconds (integer)
+		if seconds, err := strconv.Atoi(retryAfter); err == nil {
+			return time.Duration(seconds) * time.Second
+		}
+		// Try to parse as HTTP date
+		if t, err := http.ParseTime(retryAfter); err == nil {
+			return time.Until(t)
+		}
+	}
+	
+	// Fall back to exponential backoff
+	return calculateBackoff(attempt)
+}
+
+// calculateBackoff calculates exponential backoff delay
+func calculateBackoff(attempt int) time.Duration {
+	// Exponential backoff: 2^attempt * 100ms with max of 5 seconds
+	delayMs := math.Min(float64(int(1)<<uint(attempt-1))*100, 5000)
+	return time.Duration(delayMs) * time.Millisecond
+}
+
+// isSuccess checks if the status code indicates success (2xx)
+func isSuccess(statusCode int) bool {
+	return statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices
+}
+
+// isRedirect checks if the status code indicates a redirect (3xx)
+func isRedirect(statusCode int) bool {
+	return statusCode >= http.StatusMultipleChoices && statusCode < http.StatusBadRequest
+}
+
+// isClientError checks if the status code indicates a client error (4xx)
+func isClientError(statusCode int) bool {
+	return statusCode >= http.StatusBadRequest && statusCode < http.StatusInternalServerError
+}
+
+// isServerError checks if the status code indicates a server error (5xx)
+func isServerError(statusCode int) bool {
+	return statusCode >= http.StatusInternalServerError
 }
 
 // newHTTPClient creates a new HTTP client for remote tokenizer requests
@@ -81,8 +142,8 @@ func (c *httpClient) Post(ctx context.Context, path string, request interface{})
 	var lastErr error
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
-			// Exponential backoff: 2^attempt * 100ms with max of 5 seconds
-			backoff := time.Duration(math.Min(float64(int(1)<<uint(attempt-1))*100, 5000)) * time.Millisecond
+			// Calculate backoff delay
+			backoff := calculateBackoff(attempt)
 			select {
 			case <-time.After(backoff):
 			case <-ctx.Done():
@@ -117,26 +178,78 @@ func (c *httpClient) Post(ctx context.Context, path string, request interface{})
 			continue
 		}
 
-		// Check status code
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		// Handle status code
+		switch {
+		case isSuccess(resp.StatusCode):
+			// 2xx - Success
 			return body, nil
-		}
-
-		// Handle different error codes
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			// Client errors (4xx) - don't retry
+			
+		case isRedirect(resp.StatusCode):
+			// 3xx - Redirect (treat as error, HTTP client should handle redirects automatically)
+			return nil, ErrHTTPRequest{
+				StatusCode: resp.StatusCode,
+				Message:    fmt.Sprintf("unexpected redirect on %s", path),
+				Body:       string(body),
+			}
+			
+		case resp.StatusCode == http.StatusTooManyRequests:
+			// 429 - Too Many Requests (special handling with Retry-After)
+			if attempt < c.maxRetries {
+				delay := getRetryDelay(resp, attempt+1)
+				select {
+				case <-time.After(delay):
+					continue
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			lastErr = ErrHTTPRequest{
+				StatusCode: resp.StatusCode,
+				Message:    fmt.Sprintf("rate limit exceeded on %s", path),
+				Body:       string(body),
+			}
+			
+		case isClientError(resp.StatusCode):
+			// 4xx - Client error (non-retryable except for specific codes)
+			if isRetryable(resp) {
+				lastErr = ErrHTTPRequest{
+					StatusCode: resp.StatusCode,
+					Message:    fmt.Sprintf("retryable client error on %s", path),
+					Body:       string(body),
+				}
+				continue
+			}
+			// Non-retryable client error
 			return nil, ErrHTTPRequest{
 				StatusCode: resp.StatusCode,
 				Message:    fmt.Sprintf("client error on %s", path),
 				Body:       string(body),
 			}
-		}
-
-		// Server errors (5xx) - retry
-		lastErr = ErrHTTPRequest{
-			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("server error on %s", path),
-			Body:       string(body),
+			
+		case isServerError(resp.StatusCode):
+			// 5xx - Server error (check if retryable)
+			if isRetryable(resp) {
+				lastErr = ErrHTTPRequest{
+					StatusCode: resp.StatusCode,
+					Message:    fmt.Sprintf("server error on %s", path),
+					Body:       string(body),
+				}
+				continue
+			}
+			// Non-retryable server error
+			return nil, ErrHTTPRequest{
+				StatusCode: resp.StatusCode,
+				Message:    fmt.Sprintf("non-retryable server error on %s", path),
+				Body:       string(body),
+			}
+			
+		default:
+			// Unknown status code
+			return nil, ErrHTTPRequest{
+				StatusCode: resp.StatusCode,
+				Message:    fmt.Sprintf("unexpected status code on %s", path),
+				Body:       string(body),
+			}
 		}
 	}
 
@@ -167,13 +280,26 @@ func (c *httpClient) Get(ctx context.Context, path string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+	if isSuccess(resp.StatusCode) {
 		return body, nil
+	}
+
+	// Determine error message based on status code category
+	var message string
+	switch {
+	case isRedirect(resp.StatusCode):
+		message = fmt.Sprintf("unexpected redirect on GET %s", path)
+	case isClientError(resp.StatusCode):
+		message = fmt.Sprintf("client error on GET %s", path)
+	case isServerError(resp.StatusCode):
+		message = fmt.Sprintf("server error on GET %s", path)
+	default:
+		message = fmt.Sprintf("unexpected status code on GET %s", path)
 	}
 
 	return nil, ErrHTTPRequest{
 		StatusCode: resp.StatusCode,
-		Message:    fmt.Sprintf("GET request failed on %s", path),
+		Message:    message,
 		Body:       string(body),
 	}
 }
