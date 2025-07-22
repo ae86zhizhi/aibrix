@@ -31,6 +31,22 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	// Backoff configuration
+	backoffBaseDelayMs = 100
+	backoffMaxDelayMs  = 5000
+
+	// HTTP transport configuration
+	maxIdleConns          = 100
+	maxIdleConnsPerHost   = 10
+	idleConnTimeout       = 90 * time.Second
+	dialTimeout           = 30 * time.Second
+	keepAliveTimeout      = 30 * time.Second
+	tlsHandshakeTimeout   = 10 * time.Second
+	responseHeaderTimeout = 10 * time.Second
+	expectContinueTimeout = 1 * time.Second
+)
+
 // httpClient handles HTTP requests to remote tokenizer services
 type httpClient struct {
 	baseURL    string
@@ -67,7 +83,7 @@ func getRetryDelay(resp *http.Response, attempt int) time.Duration {
 			return time.Until(t)
 		}
 	}
-	
+
 	// Fall back to exponential backoff
 	return calculateBackoff(attempt)
 }
@@ -75,7 +91,7 @@ func getRetryDelay(resp *http.Response, attempt int) time.Duration {
 // calculateBackoff calculates exponential backoff delay
 func calculateBackoff(attempt int) time.Duration {
 	// Exponential backoff: 2^attempt * 100ms with max of 5 seconds
-	delayMs := math.Min(float64(int(1)<<uint(attempt-1))*100, 5000)
+	delayMs := math.Min(float64(int(1)<<uint(attempt-1))*backoffBaseDelayMs, float64(backoffMaxDelayMs))
 	return time.Duration(delayMs) * time.Millisecond
 }
 
@@ -103,16 +119,16 @@ func isServerError(statusCode int) bool {
 func newHTTPClient(baseURL string, timeout time.Duration, maxRetries int) *httpClient {
 	// Create HTTP client with connection pooling
 	transport := &http.Transport{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
+		MaxIdleConns:        maxIdleConns,
+		MaxIdleConnsPerHost: maxIdleConnsPerHost,
+		IdleConnTimeout:     idleConnTimeout,
 		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
+			Timeout:   dialTimeout,
+			KeepAlive: keepAliveTimeout,
 		}).DialContext,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
+		TLSHandshakeTimeout:   tlsHandshakeTimeout,
+		ResponseHeaderTimeout: responseHeaderTimeout,
+		ExpectContinueTimeout: expectContinueTimeout,
 		DisableCompression:    true,
 	}
 
@@ -183,7 +199,7 @@ func (c *httpClient) Post(ctx context.Context, path string, request interface{})
 		case isSuccess(resp.StatusCode):
 			// 2xx - Success
 			return body, nil
-			
+
 		case isRedirect(resp.StatusCode):
 			// 3xx - Redirect (treat as error, HTTP client should handle redirects automatically)
 			return nil, ErrHTTPRequest{
@@ -191,7 +207,7 @@ func (c *httpClient) Post(ctx context.Context, path string, request interface{})
 				Message:    fmt.Sprintf("unexpected redirect on %s", path),
 				Body:       string(body),
 			}
-			
+
 		case resp.StatusCode == http.StatusTooManyRequests:
 			// 429 - Too Many Requests (special handling with Retry-After)
 			if attempt < c.maxRetries {
@@ -208,7 +224,7 @@ func (c *httpClient) Post(ctx context.Context, path string, request interface{})
 				Message:    fmt.Sprintf("rate limit exceeded on %s", path),
 				Body:       string(body),
 			}
-			
+
 		case isClientError(resp.StatusCode):
 			// 4xx - Client error (non-retryable except for specific codes)
 			if isRetryable(resp) {
@@ -225,7 +241,7 @@ func (c *httpClient) Post(ctx context.Context, path string, request interface{})
 				Message:    fmt.Sprintf("client error on %s", path),
 				Body:       string(body),
 			}
-			
+
 		case isServerError(resp.StatusCode):
 			// 5xx - Server error (check if retryable)
 			if isRetryable(resp) {
@@ -242,7 +258,7 @@ func (c *httpClient) Post(ctx context.Context, path string, request interface{})
 				Message:    fmt.Sprintf("non-retryable server error on %s", path),
 				Body:       string(body),
 			}
-			
+
 		default:
 			// Unknown status code
 			return nil, ErrHTTPRequest{

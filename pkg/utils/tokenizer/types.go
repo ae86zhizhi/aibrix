@@ -76,7 +76,6 @@ type VLLMTokenizerConfig struct {
 	ReturnTokenStrings bool   // Default value for returning token strings
 }
 
-
 // vllmTokenizeCompletionRequest represents a request to tokenize completion text
 type vllmTokenizeCompletionRequest struct {
 	Model            string `json:"model,omitempty"`
