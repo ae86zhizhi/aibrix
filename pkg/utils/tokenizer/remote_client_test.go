@@ -372,7 +372,14 @@ func TestRemoteTokenizerHealthCheck(t *testing.T) {
 
 			// Test health check
 			ctx := context.Background()
-			healthy := tokenizer.IsHealthy(ctx)
+			// Use type assertion to access remote-specific methods
+			remoteTokenizer, ok := tokenizer.(interface {
+				IsHealthy(context.Context) bool
+			})
+			if !ok {
+				t.Fatal("Tokenizer does not implement IsHealthy method")
+			}
+			healthy := remoteTokenizer.IsHealthy(ctx)
 
 			if healthy != tt.expectHealthy {
 				t.Errorf("IsHealthy() = %v, want %v", healthy, tt.expectHealthy)

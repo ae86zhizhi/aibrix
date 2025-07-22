@@ -28,7 +28,7 @@ const (
 	defaultRemoteMaxRetries = 3
 )
 
-// remoteTokenizerImpl implements the RemoteTokenizer interface
+// remoteTokenizerImpl implements the remoteTokenizer interface
 type remoteTokenizerImpl struct {
 	config  RemoteTokenizerConfig
 	client  *httpClient
@@ -36,7 +36,7 @@ type remoteTokenizerImpl struct {
 }
 
 // NewRemoteTokenizer creates a new remote tokenizer instance
-func NewRemoteTokenizer(config RemoteTokenizerConfig) (RemoteTokenizer, error) {
+func NewRemoteTokenizer(config RemoteTokenizerConfig) (Tokenizer, error) {
 	if err := validateRemoteConfig(&config); err != nil {
 		return nil, err
 	}
@@ -219,5 +219,5 @@ func validateRemoteConfig(c *RemoteTokenizerConfig) error {
 	return nil
 }
 
-// Ensure remoteTokenizerImpl implements RemoteTokenizer interface
-var _ RemoteTokenizer = (*remoteTokenizerImpl)(nil)
+// Ensure remoteTokenizerImpl implements remoteTokenizer interface
+var _ remoteTokenizer = (*remoteTokenizerImpl)(nil)

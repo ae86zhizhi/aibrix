@@ -23,8 +23,8 @@ type Tokenizer interface {
 	TokenizeInputText(string) ([]byte, error)
 }
 
-// ExtendedTokenizer represents an extended tokenizer interface with advanced features
-type ExtendedTokenizer interface {
+// extendedTokenizer represents an extended tokenizer interface with advanced features
+type extendedTokenizer interface {
 	Tokenizer // Embed existing interface for backward compatibility
 
 	// TokenizeWithOptions performs tokenization with advanced options
@@ -35,9 +35,9 @@ type ExtendedTokenizer interface {
 }
 
 
-// RemoteTokenizer interface extends ExtendedTokenizer with remote-specific methods
-type RemoteTokenizer interface {
-	ExtendedTokenizer
+// remoteTokenizer interface extends extendedTokenizer with remote-specific methods
+type remoteTokenizer interface {
+	extendedTokenizer
 	GetEndpoint() string
 	IsHealthy(ctx context.Context) bool
 	Close() error
