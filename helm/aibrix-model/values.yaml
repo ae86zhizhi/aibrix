@@ -1,0 +1,140 @@
+---
+# Default values for aibrix-model.
+# This is a YAML-formatted file.
+# Declare variables to be substituted into your templates.
+
+replicaCount: 1
+
+image:
+  repository: vllm/vllm-openai
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "v0.7.1"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+model:
+  name: "my-model"
+  image: "vllm/vllm-openai:v0.7.1"
+  huggingfaceName: "meta-llama/Llama-3.1-8B-Instruct"
+  servedModelName: "llama-8b-instruct"
+  maxModelLen: "12288"
+
+  # NEW: KV event configuration
+  kvEvents:
+    enabled: true
+    publisherType: "zmq"
+    eventPort: 5557
+    replayPort: 5558
+    bufferSteps: 10000
+    hwm: 100000  # ZMQ high water mark
+
+  # vLLM configuration
+  host: "0.0.0.0"
+  port: 8000
+  uvicornLogLevel: "warning"
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: false
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname
+  # template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 8000
+  metricsPort: 8080
+  # KV event ports (optional, for debugging)
+  kvEventsPort: 5557
+  kvReplayPort: 5558
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+resources:
+  limits:
+    nvidia.com/gpu: "1"
+  requests:
+    nvidia.com/gpu: "1"
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Health check configuration
+healthCheck:
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8000
+      scheme: HTTP
+    failureThreshold: 3
+    periodSeconds: 5
+    successThreshold: 1
+    timeoutSeconds: 1
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8000
+      scheme: HTTP
+    failureThreshold: 5
+    periodSeconds: 5
+    successThreshold: 1
+    timeoutSeconds: 1
+  startupProbe:
+    httpGet:
+      path: /health
+      port: 8000
+      scheme: HTTP
+    failureThreshold: 30
+    periodSeconds: 5
+    successThreshold: 1
+    timeoutSeconds: 1
+
+# Prometheus monitoring
+monitoring:
+  enabled: true
+  prometheus:
+    scrape: true
+    port: 8080

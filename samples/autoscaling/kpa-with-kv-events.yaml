@@ -1,0 +1,26 @@
+---
+apiVersion: autoscaling.aibrix.ai/v1alpha1
+kind: PodAutoscaler
+metadata:
+  name: llama-8b-kpa
+  namespace: default
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: llama-8b-instruct
+  metric:
+    name: pending_requests_v2
+  algorithm:
+    type: KPA
+    kpa:
+      targetValue: 5
+      scaleUpRate: 100
+      scaleDownRate: 10
+  minReplicas: 1
+  maxReplicas: 10
+  # Template modifications for scaled pods
+  template:
+    metadata:
+      labels:
+        model.aibrix.ai/kv-events-enabled: "true"

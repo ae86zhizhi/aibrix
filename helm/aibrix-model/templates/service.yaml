@@ -1,0 +1,42 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "aibrix-model.fullname" . }}
+  labels:
+    {{- include "aibrix-model.labels" . | nindent 4 }}
+    model.aibrix.ai/name: {{ .Values.model.servedModelName }}
+    {{- if .Values.monitoring.enabled }}
+    prometheus-discovery: "true"
+    {{- end }}
+  {{- if .Values.monitoring.enabled }}
+  annotations:
+    prometheus.io/scrape: "{{ .Values.monitoring.prometheus.scrape }}"
+    prometheus.io/port: "{{ .Values.monitoring.prometheus.port }}"
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: api
+      protocol: TCP
+      name: serve
+    {{- if .Values.monitoring.enabled }}
+    - port: {{ .Values.service.metricsPort }}
+      targetPort: {{ .Values.service.metricsPort }}
+      protocol: TCP
+      name: metrics
+    {{- end }}
+    {{- if .Values.model.kvEvents.enabled }}
+    # KV event ports (optional, for debugging)
+    - port: {{ .Values.service.kvEventsPort }}
+      targetPort: kv-events
+      protocol: TCP
+      name: kv-events
+    - port: {{ .Values.service.kvReplayPort }}
+      targetPort: kv-replay
+      protocol: TCP
+      name: kv-replay
+    {{- end }}
+  selector:
+    {{- include "aibrix-model.selectorLabels" . | nindent 4 }}
