@@ -163,13 +163,13 @@ func TestMatchPrefix(t *testing.T) {
 	partialTokens := makeTokens(16) // 16 bytes = 1 block
 	partialHashes := table.GetPrefixHashes(partialTokens)
 	matches, returnedHashes := table.MatchPrefix(modelName, loraID, partialTokens, readyPods)
-	
+
 	// Debug output
 	t.Logf("Original tokens: %v (len=%d), hashes: %v", tokens, len(tokens), hashes)
 	t.Logf("Partial tokens: %v (len=%d), hashes: %v", partialTokens, len(partialTokens), partialHashes)
 	t.Logf("Returned hashes from MatchPrefix: %v", returnedHashes)
 	t.Logf("Match percentage: %d%%", matches[podName])
-	
+
 	// Since partialTokens is 16 bytes (1 block) and that block is stored,
 	// we expect 100% match (all blocks in the partial request matched)
 	if matches[podName] != 100 {
@@ -184,7 +184,7 @@ func TestProcessBlockStored(t *testing.T) {
 	modelName := "test-model"
 	loraID := int64(123)
 	sourcePod := "pod1"
-	
+
 	// Test validation
 	t.Run("empty event", func(t *testing.T) {
 		err := table.ProcessBlockStored(BlockStored{})
@@ -192,7 +192,7 @@ func TestProcessBlockStored(t *testing.T) {
 			t.Error("should handle empty event gracefully")
 		}
 	})
-	
+
 	t.Run("mismatched lengths", func(t *testing.T) {
 		event := BlockStored{
 			BlockHashes: []int64{1, 2},
@@ -203,12 +203,12 @@ func TestProcessBlockStored(t *testing.T) {
 			t.Error("should return error for mismatched lengths")
 		}
 	})
-	
+
 	// Create test event
 	tokens1 := []byte{1, 2, 3, 4}
 	tokens2 := []byte{5, 6, 7, 8}
 	parentHash := int64(999)
-	
+
 	event := BlockStored{
 		BlockHashes:     []int64{1001, 1002},
 		ParentBlockHash: &parentHash,
@@ -237,14 +237,14 @@ func TestProcessBlockStored(t *testing.T) {
 	}
 
 	contextData := value.(*ContextData)
-	
+
 	// Check hash mapping
 	contextData.mappingMu.RLock()
 	if len(contextData.hashMapping.engineToAibrix) != 2 {
 		t.Errorf("expected 2 hash mappings, got %d", len(contextData.hashMapping.engineToAibrix))
 	}
 	contextData.mappingMu.RUnlock()
-	
+
 	// Check prefix store
 	contextData.prefixMu.RLock()
 	if contextData.prefixStore.totalPrefixes != 2 {
@@ -306,17 +306,17 @@ func TestProcessBlockRemoved(t *testing.T) {
 	contextData := value.(*ContextData)
 
 	contextData.mappingMu.RLock()
-	
+
 	// Should have only 1 block left (2002)
 	if len(contextData.hashMapping.engineToAibrix) != 1 {
 		t.Errorf("expected 1 hash mapping, got %d", len(contextData.hashMapping.engineToAibrix))
 	}
-	
+
 	_, exists := contextData.hashMapping.engineToAibrix[2002]
 	if !exists {
 		t.Error("block 2002 should still exist")
 	}
-	
+
 	contextData.mappingMu.RUnlock()
 }
 
@@ -333,15 +333,15 @@ func TestConcurrentOperations(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			
+
 			modelName := fmt.Sprintf("model-%d", id)
 			loraID := int64(id)
 			podName := fmt.Sprintf("pod-%d", id)
 
 			for j := 0; j < numOperations; j++ {
-				tokens := []byte{byte(j), byte(j+1), byte(j+2), byte(j+3)}
+				tokens := []byte{byte(j), byte(j + 1), byte(j + 2), byte(j + 3)}
 				hashes := table.GetPrefixHashes(tokens)
-				
+
 				err := table.AddPrefix(modelName, loraID, podName, hashes)
 				if err != nil {
 					t.Errorf("goroutine %d: failed to add prefix: %v", id, err)
@@ -355,14 +355,14 @@ func TestConcurrentOperations(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			
+
 			modelName := fmt.Sprintf("model-%d", id)
 			loraID := int64(id)
 			podName := fmt.Sprintf("pod-%d", id)
 			readyPods := map[string]struct{}{podName: {}}
 
 			for j := 0; j < numOperations; j++ {
-				tokens := []byte{byte(j), byte(j+1), byte(j+2), byte(j+3)}
+				tokens := []byte{byte(j), byte(j + 1), byte(j + 2), byte(j + 3)}
 				table.MatchPrefix(modelName, loraID, tokens, readyPods)
 			}
 		}(i)
@@ -388,7 +388,7 @@ func TestEviction(t *testing.T) {
 		evictionDuration:      200 * time.Millisecond,
 		stopCh:                make(chan struct{}),
 	}
-	
+
 	// Start eviction worker
 	table.wg.Add(1)
 	go table.evictionWorker()
@@ -425,7 +425,7 @@ func TestEviction(t *testing.T) {
 	// Context should be evicted
 	if table.contextCount.Load() != 0 {
 		t.Errorf("context should have been evicted, but count is %d", table.contextCount.Load())
-		
+
 		// Debug: check if context still exists
 		if _, exists := table.contextMap.Load(ctx); exists {
 			t.Error("context still exists in map")
@@ -509,7 +509,6 @@ func TestProcessAllBlocksCleared(t *testing.T) {
 	}
 }
 
-
 func TestReverseIndex(t *testing.T) {
 	table := NewSyncPrefixHashTable()
 	defer table.Close()
@@ -587,7 +586,7 @@ func TestScheduleEviction(t *testing.T) {
 	if table.evictionNeeded.Load() {
 		t.Error("eviction flag should be cleared after eviction")
 	}
-	
+
 	// Additionally verify eviction can run
 	if table.evictionRunning.Load() {
 		t.Error("eviction should not still be running")

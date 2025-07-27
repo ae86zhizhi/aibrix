@@ -40,7 +40,7 @@ type ZMQClientMetrics struct {
 	// Event metrics
 	eventsReceived      *prometheus.CounterVec
 	eventsProcessed     *prometheus.CounterVec
-	eventProcessingTime prometheus.Histogram
+	eventProcessingTime prometheus.Observer
 	missedEvents        prometheus.Counter
 
 	// Replay metrics

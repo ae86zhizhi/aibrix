@@ -19,6 +19,8 @@ package cache
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +33,7 @@ import (
 	prometheusv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/vllm-project/aibrix/pkg/metrics"
 	"github.com/vllm-project/aibrix/pkg/utils"
+	syncindexer "github.com/vllm-project/aibrix/pkg/utils/syncprefixcacheindexer"
 )
 
 var (
@@ -83,6 +86,12 @@ type Store struct {
 
 	// podMetricsJobs Channel for sending Pod metrics update jobs to workers
 	podMetricsJobs chan *Pod
+
+	// Sync prefix indexer - only created when KV sync is enabled
+	syncPrefixIndexer *syncindexer.SyncPrefixHashTable
+
+	// KV event management - optional enhancement
+	kvEventManager *KVEventManager
 }
 
 // Get retrieves the cache instance
@@ -279,6 +288,12 @@ func InitForGateway(config *rest.Config, stopCh <-chan struct{}, redisClient *re
 		if store.enableTracing {
 			initTraceCache(redisClient, stopCh)
 		}
+
+		// Initialize KV event sync if enabled
+		if err := store.initKVEventSync(); err != nil {
+			klog.Errorf("Failed to initialize KV event sync: %v", err)
+			// Continue without KV sync - this is not a fatal error
+		}
 	})
 
 	return store
@@ -380,4 +395,46 @@ func initTraceCache(redisClient *redis.Client, stopCh <-chan struct{}) {
 			}
 		}
 	}()
+}
+
+// initKVEventSync initializes the KV event synchronization system
+func (s *Store) initKVEventSync() error {
+	// Check if KV sync should be enabled
+	kvSyncValue := utils.LoadEnv("AIBRIX_KV_EVENT_SYNC_ENABLED", "false")
+	kvSyncEnabled, _ := strconv.ParseBool(kvSyncValue)
+	remoteTokenValue := utils.LoadEnv("AIBRIX_USE_REMOTE_TOKENIZER", "false")
+	remoteTokenizerEnabled, _ := strconv.ParseBool(remoteTokenValue)
+
+	// Create sync indexer only if KV sync is properly configured
+	if kvSyncEnabled && remoteTokenizerEnabled {
+		s.syncPrefixIndexer = syncindexer.NewSyncPrefixHashTable()
+
+		// Enable KV event sync
+		s.kvEventManager = NewKVEventManager(s)
+		if err := s.kvEventManager.Start(); err != nil {
+			return fmt.Errorf("failed to start KV event sync: %w", err)
+		}
+		klog.Info("KV event synchronization initialized successfully")
+	} else if kvSyncEnabled && !remoteTokenizerEnabled {
+		klog.Warning("KV sync requires remote tokenizer, feature disabled")
+	}
+
+	return nil
+}
+
+// GetSyncPrefixIndexer returns the sync prefix hash indexer
+func (s *Store) GetSyncPrefixIndexer() *syncindexer.SyncPrefixHashTable {
+	// Return sync indexer only if KV sync is enabled
+	// Router will fall back to original indexer if this returns nil
+	return s.syncPrefixIndexer
+}
+
+// Close gracefully shuts down the cache store
+func (s *Store) Close() {
+	if s.syncPrefixIndexer != nil {
+		s.syncPrefixIndexer.Close()
+	}
+	if s.kvEventManager != nil {
+		s.kvEventManager.Stop()
+	}
 }

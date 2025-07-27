@@ -207,6 +207,9 @@ func (c *ZMQClient) Stop() {
 	c.cleanupSocketsLocked()
 	c.mu.Unlock()
 
+	// Clean up metrics
+	c.metrics.Delete()
+
 	klog.Infof("ZMQ client stopped for pod %s", c.config.PodKey)
 }
 

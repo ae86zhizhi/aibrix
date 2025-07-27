@@ -39,11 +39,11 @@ func BenchmarkMatchPrefix(b *testing.B) {
 		modelName := fmt.Sprintf("model-%d", i)
 		loraID := int64(i)
 		podName := fmt.Sprintf("pod-%d", i)
-		
+
 		tokens := make([]byte, tokenSize)
 		rand.Read(tokens)
 		hashes := table.GetPrefixHashes(tokens)
-		
+
 		// Use all hashes if we have fewer than numPrefixesPerContext
 		if len(hashes) < numPrefixesPerContext {
 			table.AddPrefix(modelName, loraID, podName, hashes)
@@ -54,8 +54,8 @@ func BenchmarkMatchPrefix(b *testing.B) {
 
 	// Benchmark concurrent reads
 	benchmarks := []struct {
-		name        string
-		numReaders  int
+		name       string
+		numReaders int
 	}{
 		{"1Reader", 1},
 		{"10Readers", 10},
@@ -66,7 +66,7 @@ func BenchmarkMatchPrefix(b *testing.B) {
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ResetTimer()
-			
+
 			var wg sync.WaitGroup
 			numOpsPerReader := b.N / bm.numReaders
 			if numOpsPerReader == 0 {
@@ -77,21 +77,21 @@ func BenchmarkMatchPrefix(b *testing.B) {
 				wg.Add(1)
 				go func(readerID int) {
 					defer wg.Done()
-					
+
 					modelName := fmt.Sprintf("model-%d", readerID%numContexts)
 					loraID := int64(readerID % numContexts)
 					podName := fmt.Sprintf("pod-%d", readerID%numContexts)
 					readyPods := map[string]struct{}{podName: {}}
-					
+
 					tokens := make([]byte, tokenSize)
 					rand.Read(tokens)
-					
+
 					for j := 0; j < numOpsPerReader; j++ {
 						table.MatchPrefix(modelName, loraID, tokens, readyPods)
 					}
 				}(i)
 			}
-			
+
 			wg.Wait()
 		})
 	}
@@ -114,7 +114,7 @@ func BenchmarkAddPrefix(b *testing.B) {
 			defer table.Close()
 
 			b.ResetTimer()
-			
+
 			var wg sync.WaitGroup
 			numOpsPerWriter := b.N / bm.numWriters
 			if numOpsPerWriter == 0 {
@@ -125,21 +125,21 @@ func BenchmarkAddPrefix(b *testing.B) {
 				wg.Add(1)
 				go func(writerID int) {
 					defer wg.Done()
-					
+
 					for j := 0; j < numOpsPerWriter; j++ {
 						modelName := fmt.Sprintf("model-%d", writerID)
 						loraID := int64(writerID)
 						podName := fmt.Sprintf("pod-%d-%d", writerID, j)
-						
+
 						tokens := make([]byte, 1024)
 						rand.Read(tokens)
 						hashes := table.GetPrefixHashes(tokens)
-						
+
 						table.AddPrefix(modelName, loraID, podName, hashes)
 					}
 				}(i)
 			}
-			
+
 			wg.Wait()
 		})
 	}
@@ -155,11 +155,11 @@ func BenchmarkMixedOperations(b *testing.B) {
 		modelName := fmt.Sprintf("model-%d", i)
 		loraID := int64(i)
 		podName := fmt.Sprintf("pod-%d", i)
-		
+
 		tokens := make([]byte, 1024)
 		rand.Read(tokens)
 		hashes := table.GetPrefixHashes(tokens)
-		
+
 		table.AddPrefix(modelName, loraID, podName, hashes)
 	}
 
@@ -177,7 +177,7 @@ func BenchmarkMixedOperations(b *testing.B) {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			
+
 			for j := 0; j < numOpsPerWorker; j++ {
 				if rand.Float32() < 0.8 {
 					// Read operation
@@ -185,35 +185,35 @@ func BenchmarkMixedOperations(b *testing.B) {
 					loraID := int64(rand.Intn(50))
 					podName := fmt.Sprintf("pod-%d", rand.Intn(50))
 					readyPods := map[string]struct{}{podName: {}}
-					
+
 					tokens := make([]byte, 1024)
 					rand.Read(tokens)
-					
+
 					table.MatchPrefix(modelName, loraID, tokens, readyPods)
 				} else {
 					// Write operation
 					modelName := fmt.Sprintf("model-%d", workerID)
 					loraID := int64(workerID)
 					podName := fmt.Sprintf("pod-%d-%d", workerID, j)
-					
+
 					tokens := make([]byte, 1024)
 					rand.Read(tokens)
 					hashes := table.GetPrefixHashes(tokens)
-					
+
 					table.AddPrefix(modelName, loraID, podName, hashes)
 				}
 			}
 		}(i)
 	}
-	
+
 	wg.Wait()
 }
 
 // BenchmarkProcessBlockStored measures event processing performance
 func BenchmarkProcessBlockStored(b *testing.B) {
 	benchmarks := []struct {
-		name          string
-		numProcessors int
+		name           string
+		numProcessors  int
 		blocksPerEvent int
 	}{
 		{"1Proc_10Blocks", 1, 10},
@@ -228,7 +228,7 @@ func BenchmarkProcessBlockStored(b *testing.B) {
 			defer table.Close()
 
 			b.ResetTimer()
-			
+
 			var wg sync.WaitGroup
 			numOpsPerProcessor := b.N / bm.numProcessors
 			if numOpsPerProcessor == 0 {
@@ -239,23 +239,23 @@ func BenchmarkProcessBlockStored(b *testing.B) {
 				wg.Add(1)
 				go func(procID int) {
 					defer wg.Done()
-					
+
 					for j := 0; j < numOpsPerProcessor; j++ {
 						modelName := fmt.Sprintf("model-%d", procID)
 						loraID := int64(procID)
 						sourcePod := fmt.Sprintf("pod-%d", procID)
-						
+
 						// Create event with multiple blocks
 						blockHashes := make([]int64, bm.blocksPerEvent)
 						tokens := make([][]byte, bm.blocksPerEvent)
-						
+
 						for k := 0; k < bm.blocksPerEvent; k++ {
 							blockHashes[k] = int64(procID*1000000 + j*1000 + k)
 							blockTokens := make([]byte, prefixCacheBlockSize)
 							rand.Read(blockTokens)
 							tokens[k] = blockTokens
 						}
-						
+
 						event := BlockStored{
 							BlockHashes: blockHashes,
 							Tokens:      tokens,
@@ -263,12 +263,12 @@ func BenchmarkProcessBlockStored(b *testing.B) {
 							LoraID:      loraID,
 							SourcePod:   sourcePod,
 						}
-						
+
 						table.ProcessBlockStored(event)
 					}
 				}(i)
 			}
-			
+
 			wg.Wait()
 		})
 	}
@@ -290,10 +290,10 @@ func BenchmarkGetPrefixHashes(b *testing.B) {
 		b.Run(fmt.Sprintf("Size_%d", size), func(b *testing.B) {
 			tokens := make([]byte, size)
 			rand.Read(tokens)
-			
+
 			b.ResetTimer()
 			b.SetBytes(int64(size))
-			
+
 			for i := 0; i < b.N; i++ {
 				_ = table.GetPrefixHashes(tokens)
 			}
@@ -307,15 +307,15 @@ func BenchmarkContextCreation(b *testing.B) {
 	defer table.Close()
 
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		modelName := fmt.Sprintf("model-%d", i)
 		loraID := int64(i)
 		podName := fmt.Sprintf("pod-%d", i)
-		
+
 		tokens := []byte{1, 2, 3, 4}
 		hashes := table.GetPrefixHashes(tokens)
-		
+
 		table.AddPrefix(modelName, loraID, podName, hashes)
 	}
 }
@@ -332,7 +332,7 @@ func BenchmarkEviction(b *testing.B) {
 		evictionDuration:      1 * time.Minute,
 		stopCh:                make(chan struct{}),
 	}
-	
+
 	// Start eviction worker
 	table.wg.Add(1)
 	go table.evictionWorker()
@@ -344,11 +344,11 @@ func BenchmarkEviction(b *testing.B) {
 		modelName := fmt.Sprintf("model-%d", i)
 		loraID := int64(i)
 		podName := fmt.Sprintf("pod-%d", i)
-		
+
 		tokens := make([]byte, 1024)
 		rand.Read(tokens)
 		hashes := table.GetPrefixHashes(tokens)
-		
+
 		table.AddPrefix(modelName, loraID, podName, hashes)
 	}
 
@@ -365,7 +365,7 @@ func BenchmarkEviction(b *testing.B) {
 	})
 
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		table.performEviction()
 	}

@@ -20,19 +20,19 @@ package syncprefixcacheindexer
 type BlockStored struct {
 	// BlockHashes contains the engine block hashes that were stored
 	BlockHashes []int64
-	
+
 	// ParentBlockHash is the optional parent block hash
 	// nil means this is the first block in the sequence
 	ParentBlockHash *int64
-	
+
 	// Tokens contains the token data for each block
 	// The length should match BlockHashes
 	Tokens [][]byte
-	
+
 	// Context information
 	ModelName string
 	LoraID    int64 // -1 for no adapter
-	
+
 	// Source pod that stored these blocks
 	SourcePod string
 }
@@ -41,11 +41,11 @@ type BlockStored struct {
 type BlockRemoved struct {
 	// BlockHashes contains the engine block hashes that were removed
 	BlockHashes []int64
-	
+
 	// Context information
 	ModelName string
 	LoraID    int64 // -1 for no adapter
-	
+
 	// Source pod that removed these blocks (optional)
 	SourcePod string
 }
