@@ -20,6 +20,7 @@ limitations under the License.
 package cache
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -415,6 +416,16 @@ func TestTokenIDsToBytes(t *testing.T) {
 			tokenIDs: []int32{256, 512},
 			expected: []byte{0, 0, 1, 0, 0, 0, 2, 0}, // 256 and 512 in big-endian
 		},
+		{
+			name:     "negative token",
+			tokenIDs: []int32{-1},
+			expected: []byte{255, 255, 255, 255}, // -1 in big-endian
+		},
+		{
+			name:     "large tokens",
+			tokenIDs: []int32{2147483647, -2147483648},
+			expected: []byte{127, 255, 255, 255, 128, 0, 0, 0}, // max and min int32
+		},
 	}
 
 	for _, tt := range tests {
@@ -423,4 +434,227 @@ func TestTokenIDsToBytes(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// TestConfigurationDependencies tests configuration dependency validation
+func TestConfigurationDependencies(t *testing.T) {
+	tests := []struct {
+		name              string
+		remoteTokenizer   string
+		kvSyncRequested   string
+		expectedKVEnabled bool
+		expectedWarning   bool
+	}{
+		{
+			name:              "both enabled",
+			remoteTokenizer:   "true",
+			kvSyncRequested:   "true",
+			expectedKVEnabled: true,
+			expectedWarning:   false,
+		},
+		{
+			name:              "kv sync without remote tokenizer",
+			remoteTokenizer:   "false",
+			kvSyncRequested:   "true",
+			expectedKVEnabled: false,
+			expectedWarning:   true,
+		},
+		{
+			name:              "remote tokenizer only",
+			remoteTokenizer:   "true",
+			kvSyncRequested:   "false",
+			expectedKVEnabled: false,
+			expectedWarning:   false,
+		},
+		{
+			name:              "both disabled",
+			remoteTokenizer:   "false",
+			kvSyncRequested:   "false",
+			expectedKVEnabled: false,
+			expectedWarning:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set environment variables
+			t.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", tt.remoteTokenizer)
+			t.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", tt.kvSyncRequested)
+
+			// Create manager
+			store := &Store{}
+			manager := NewKVEventManager(store)
+
+			// Check results
+			assert.Equal(t, tt.expectedKVEnabled, manager.enabled)
+		})
+	}
+}
+
+// TestPodUpdateScenarios tests various pod update scenarios
+func TestPodUpdateScenarios(t *testing.T) {
+	// Setup environment
+	t.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", "true")
+	t.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", "true")
+
+	store := &Store{
+		syncPrefixIndexer: syncindexer.NewSyncPrefixHashTable(),
+	}
+	manager := NewKVEventManager(store)
+
+	basePod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			Labels: map[string]string{
+				"model.aibrix.ai/name":              "test-model",
+				"model.aibrix.ai/kv-events-enabled": "true",
+			},
+		},
+		Status: v1.PodStatus{
+			Phase: v1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	tests := []struct {
+		name        string
+		oldPod      *v1.Pod
+		newPod      *v1.Pod
+		description string
+	}{
+		{
+			name:   "IP address change",
+			oldPod: basePod.DeepCopy(),
+			newPod: func() *v1.Pod {
+				p := basePod.DeepCopy()
+				p.Status.PodIP = "10.0.0.2"
+				return p
+			}(),
+			description: "Should handle IP address change",
+		},
+		{
+			name:   "Phase change to not running",
+			oldPod: basePod.DeepCopy(),
+			newPod: func() *v1.Pod {
+				p := basePod.DeepCopy()
+				p.Status.Phase = v1.PodPending
+				return p
+			}(),
+			description: "Should handle phase change",
+		},
+		{
+			name:   "KV events disabled",
+			oldPod: basePod.DeepCopy(),
+			newPod: func() *v1.Pod {
+				p := basePod.DeepCopy()
+				p.Labels["model.aibrix.ai/kv-events-enabled"] = "false"
+				return p
+			}(),
+			description: "Should handle KV events being disabled",
+		},
+		{
+			name:   "Model name change",
+			oldPod: basePod.DeepCopy(),
+			newPod: func() *v1.Pod {
+				p := basePod.DeepCopy()
+				p.Labels["model.aibrix.ai/name"] = "new-model"
+				return p
+			}(),
+			description: "Should handle model name change",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test update handling
+			manager.OnPodUpdate(tt.oldPod, tt.newPod)
+			// Verify no panic occurs
+		})
+	}
+
+	store.Close()
+}
+
+// TestConcurrentPodOperations tests concurrent pod operations
+func TestConcurrentPodOperations(t *testing.T) {
+	t.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", "true")
+	t.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", "true")
+
+	store := &Store{
+		syncPrefixIndexer: syncindexer.NewSyncPrefixHashTable(),
+	}
+	manager := NewKVEventManager(store)
+
+	// Run concurrent operations
+	done := make(chan bool)
+	go func() {
+		for i := 0; i < 10; i++ {
+			pod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("pod-%d", i),
+					Namespace: "default",
+					Labels: map[string]string{
+						"model.aibrix.ai/name":              "test-model",
+						"model.aibrix.ai/kv-events-enabled": "true",
+					},
+				},
+				Status: v1.PodStatus{
+					Phase: v1.PodRunning,
+					PodIP: fmt.Sprintf("10.0.0.%d", i),
+				},
+			}
+			manager.OnPodAdd(pod)
+			time.Sleep(10 * time.Millisecond)
+			manager.OnPodDelete(pod)
+		}
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		// Success
+	case <-time.After(60 * time.Second):
+		t.Fatal("Concurrent operations timed out")
+	}
+
+	store.Close()
+}
+
+// TestEventHandlerErrorScenarios tests error scenarios in event handling
+func TestEventHandlerErrorScenarios(t *testing.T) {
+	store := &Store{
+		syncPrefixIndexer: syncindexer.NewSyncPrefixHashTable(),
+	}
+	manager := NewKVEventManager(store)
+
+	handler := &kvEventHandler{
+		manager:   manager,
+		podKey:    "default/test-pod",
+		modelName: "test-model",
+	}
+
+	// Test with nil event
+	err := handler.HandleEvent(nil)
+	assert.NoError(t, err) // Should handle gracefully
+
+	// Test with unknown event type
+	type unknownEvent struct {
+		kvcache.KVEvent
+	}
+	err = handler.HandleEvent(&unknownEvent{})
+	assert.NoError(t, err) // Should handle unknown types gracefully
+
+	// Test with missing pod in store
+	storedEvent := &kvcache.BlockStoredEvent{
+		Type:        kvcache.EventTypeBlockStored,
+		Timestamp:   time.Now(),
+		BlockHashes: []int64{1234},
+		TokenIDs:    [][]int32{{100}},
+		ModelName:   "test-model",
+		PodName:     "default/missing-pod",
+	}
+	handler.podKey = "default/missing-pod"
+	err = handler.HandleEvent(storedEvent)
+	assert.NoError(t, err) // Should handle missing pod gracefully
 }

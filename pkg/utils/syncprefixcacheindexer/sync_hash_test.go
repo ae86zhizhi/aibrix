@@ -613,3 +613,212 @@ func TestGracefulShutdown(t *testing.T) {
 		t.Errorf("shutdown took too long: %v", elapsed)
 	}
 }
+
+// TestConcurrentEventProcessingFromMultiplePods tests processing events from multiple pods concurrently
+func TestConcurrentEventProcessingFromMultiplePods(t *testing.T) {
+	table := NewSyncPrefixHashTable()
+	defer table.Close()
+
+	modelName := "test-model"
+	loraID := int64(-1)
+	numPods := 10
+	numEventsPerPod := 100
+	var wg sync.WaitGroup
+
+	// Concurrent event processing from multiple pods
+	for i := 0; i < numPods; i++ {
+		wg.Add(1)
+		go func(podID int) {
+			defer wg.Done()
+			
+			podName := fmt.Sprintf("pod-%d", podID)
+			
+			for j := 0; j < numEventsPerPod; j++ {
+				// Mix of store and remove events
+				if j%3 == 0 {
+					// Store event
+					blockHash := int64(podID*1000 + j)
+					event := BlockStored{
+						BlockHashes: []int64{blockHash},
+						Tokens:      [][]byte{{byte(j), byte(j), byte(j), byte(j)}},
+						ModelName:   modelName,
+						LoraID:      loraID,
+						SourcePod:   podName,
+					}
+					
+					err := table.ProcessBlockStored(event)
+					if err != nil {
+						t.Errorf("pod %d: failed to process block stored: %v", podID, err)
+					}
+				} else if j%3 == 1 && j > 0 {
+					// Remove event for previously stored block
+					blockHash := int64(podID*1000 + j - 1)
+					event := BlockRemoved{
+						BlockHashes: []int64{blockHash},
+						ModelName:   modelName,
+						LoraID:      loraID,
+					}
+					
+					err := table.ProcessBlockRemoved(event)
+					if err != nil {
+						t.Errorf("pod %d: failed to process block removed: %v", podID, err)
+					}
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify context exists
+	ctx := ModelContext{ModelName: modelName, LoraID: loraID}
+	value, exists := table.contextMap.Load(ctx)
+	if !exists {
+		t.Fatal("context should exist after concurrent operations")
+	}
+
+	contextData := value.(*ContextData)
+	
+	// Check that we have some blocks remaining
+	contextData.mappingMu.RLock()
+	blockCount := len(contextData.hashMapping.engineToAibrix)
+	contextData.mappingMu.RUnlock()
+	
+	if blockCount == 0 {
+		t.Error("should have some blocks after concurrent operations")
+	}
+	
+	t.Logf("Final block count after concurrent operations: %d", blockCount)
+}
+
+// TestEventValidation tests validation of events
+func TestEventValidation(t *testing.T) {
+	table := NewSyncPrefixHashTable()
+	defer table.Close()
+
+	testCases := []struct {
+		name      string
+		event     BlockStored
+		wantError bool
+	}{
+		{
+			name: "valid event",
+			event: BlockStored{
+				BlockHashes: []int64{1, 2, 3},
+				Tokens:      [][]byte{{1}, {2}, {3}},
+				ModelName:   "model",
+				LoraID:      -1,
+				SourcePod:   "pod1",
+			},
+			wantError: false,
+		},
+		{
+			name: "empty block hashes",
+			event: BlockStored{
+				BlockHashes: []int64{},
+				Tokens:      [][]byte{},
+				ModelName:   "model",
+				LoraID:      -1,
+				SourcePod:   "pod1",
+			},
+			wantError: false, // Empty is allowed
+		},
+		{
+			name: "mismatched lengths",
+			event: BlockStored{
+				BlockHashes: []int64{1, 2},
+				Tokens:      [][]byte{{1}}, // Length mismatch
+				ModelName:   "model",
+				LoraID:      -1,
+				SourcePod:   "pod1",
+			},
+			wantError: true,
+		},
+		{
+			name: "nil tokens",
+			event: BlockStored{
+				BlockHashes: []int64{1, 2},
+				Tokens:      nil,
+				ModelName:   "model",
+				LoraID:      -1,
+				SourcePod:   "pod1",
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := table.ProcessBlockStored(tc.event)
+			if tc.wantError && err == nil {
+				t.Error("expected error but got none")
+			}
+			if !tc.wantError && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestMemoryCleanup tests that memory is properly cleaned up
+func TestMemoryCleanup(t *testing.T) {
+	table := NewSyncPrefixHashTable()
+	defer table.Close()
+
+	modelName := "test-model"
+	loraID := int64(-1)
+	
+	// Add and remove many blocks
+	for i := 0; i < 1000; i++ {
+		// Store block
+		storeEvent := BlockStored{
+			BlockHashes: []int64{int64(i)},
+			Tokens:      [][]byte{{byte(i), byte(i), byte(i), byte(i)}},
+			ModelName:   modelName,
+			LoraID:      loraID,
+			SourcePod:   "pod1",
+		}
+		
+		err := table.ProcessBlockStored(storeEvent)
+		if err != nil {
+			t.Fatalf("failed to store block %d: %v", i, err)
+		}
+		
+		// Immediately remove it
+		removeEvent := BlockRemoved{
+			BlockHashes: []int64{int64(i)},
+			ModelName:   modelName,
+			LoraID:      loraID,
+		}
+		
+		err = table.ProcessBlockRemoved(removeEvent)
+		if err != nil {
+			t.Fatalf("failed to remove block %d: %v", i, err)
+		}
+	}
+	
+	// Verify context still exists but is empty
+	ctx := ModelContext{ModelName: modelName, LoraID: loraID}
+	value, exists := table.contextMap.Load(ctx)
+	if !exists {
+		t.Fatal("context should still exist")
+	}
+	
+	contextData := value.(*ContextData)
+	
+	// Check that no blocks remain
+	contextData.mappingMu.RLock()
+	if len(contextData.hashMapping.engineToAibrix) != 0 {
+		t.Errorf("expected 0 blocks, got %d", len(contextData.hashMapping.engineToAibrix))
+	}
+	contextData.mappingMu.RUnlock()
+	
+	// Check reverse index is clean
+	table.blockIndexMu.RLock()
+	for blockHash, contexts := range table.blockIndex {
+		if len(contexts) > 0 {
+			t.Errorf("block %d still has %d contexts in reverse index", blockHash, len(contexts))
+		}
+	}
+	table.blockIndexMu.RUnlock()
+}
