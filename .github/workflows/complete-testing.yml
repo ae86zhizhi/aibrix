@@ -144,7 +144,9 @@ jobs:
     - name: Run E2E tests
       run: |
         export KUBECONFIG="${HOME}/.kube/config"
-        go test -v ./test/e2e/kv_sync_e2e_test.go -timeout 30m
+        # Run KV sync E2E tests from the package to include all helper files
+        # Use zmq build tag since KV cache functionality requires ZMQ
+        go test -v -tags="zmq" ./test/e2e -run "TestKVSync" -timeout 30m
     
     - name: Collect logs on failure
       if: failure()
