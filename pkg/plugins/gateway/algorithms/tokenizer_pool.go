@@ -137,7 +137,7 @@ func NewTokenizerPool(config TokenizerPoolConfig, cache cache.Cache) *TokenizerP
 }
 
 // GetTokenizer returns a tokenizer for the specified model
-func (p *TokenizerPool) GetTokenizer(model string, pods []v1.Pod) tokenizer.Tokenizer {
+func (p *TokenizerPool) GetTokenizer(model string, pods []*v1.Pod) tokenizer.Tokenizer {
 	// Metrics
 	p.metrics.tokenizerRequests.WithLabelValues(model).Inc()
 	startTime := time.Now()
@@ -152,10 +152,19 @@ func (p *TokenizerPool) GetTokenizer(model string, pods []v1.Pod) tokenizer.Toke
 
 	// Fast path: check existing tokenizer
 	p.mu.RLock()
-	if entry, exists := p.tokenizers[model]; exists && entry.healthStatus {
-		entry.lastUsed = time.Now()
+	entry, exists := p.tokenizers[model]
+	if exists && entry.healthStatus {
+		tok := entry.tokenizer
 		p.mu.RUnlock()
-		return entry.tokenizer
+
+		// Update lastUsed with write lock
+		p.mu.Lock()
+		if e, ok := p.tokenizers[model]; ok {
+			e.lastUsed = time.Now()
+		}
+		p.mu.Unlock()
+
+		return tok
 	}
 	p.mu.RUnlock()
 
@@ -164,7 +173,7 @@ func (p *TokenizerPool) GetTokenizer(model string, pods []v1.Pod) tokenizer.Toke
 }
 
 // createOrUpdateTokenizer creates or updates a tokenizer for the model
-func (p *TokenizerPool) createOrUpdateTokenizer(model string, pods []v1.Pod) tokenizer.Tokenizer {
+func (p *TokenizerPool) createOrUpdateTokenizer(model string, pods []*v1.Pod) tokenizer.Tokenizer {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -235,7 +244,7 @@ func (p *TokenizerPool) createOrUpdateTokenizer(model string, pods []v1.Pod) tok
 }
 
 // findVLLMEndpointForModel finds the vLLM endpoint for a specific model
-func (p *TokenizerPool) findVLLMEndpointForModel(model string, pods []v1.Pod) string {
+func (p *TokenizerPool) findVLLMEndpointForModel(model string, pods []*v1.Pod) string {
 	// Priority order for endpoint discovery:
 	// 1. Service endpoint (if configured)
 	if endpoint, exists := p.config.ModelServiceMap[model]; exists {
@@ -243,8 +252,7 @@ func (p *TokenizerPool) findVLLMEndpointForModel(model string, pods []v1.Pod) st
 	}
 
 	// 2. Direct pod endpoint
-	for i := range pods {
-		pod := &pods[i]
+	for _, pod := range pods {
 		if !isPodReady(pod) {
 			continue
 		}
@@ -381,24 +389,36 @@ func (p *TokenizerPool) performHealthCheck() {
 
 // cleanupStaleTokenizers removes unused tokenizers
 func (p *TokenizerPool) cleanupStaleTokenizers() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	var staleTokenizers []struct {
+		model string
+		tok   tokenizer.Tokenizer
+	}
 
+	// Collect stale tokenizers under lock
+	p.mu.Lock()
 	now := time.Now()
 	for model, entry := range p.tokenizers {
 		// Remove if unused for TTL duration
 		if now.Sub(entry.lastUsed) > p.config.TokenizerTTL {
-			if closer, ok := entry.tokenizer.(interface{ Close() error }); ok {
-				if err := closer.Close(); err != nil {
-					klog.Errorf("Error closing tokenizer for model %s: %v", model, err)
-				}
-			}
+			staleTokenizers = append(staleTokenizers, struct {
+				model string
+				tok   tokenizer.Tokenizer
+			}{model: model, tok: entry.tokenizer})
 			delete(p.tokenizers, model)
 			klog.V(4).Infof("Removed stale tokenizer for model %s", model)
 		}
 	}
-
 	p.metrics.activeTokenizers.Set(float64(len(p.tokenizers)))
+	p.mu.Unlock()
+
+	// Close tokenizers outside of lock
+	for _, stale := range staleTokenizers {
+		if closer, ok := stale.tok.(interface{ Close() error }); ok {
+			if err := closer.Close(); err != nil {
+				klog.Errorf("Error closing tokenizer for model %s: %v", stale.model, err)
+			}
+		}
+	}
 }
 
 // Close gracefully shuts down the TokenizerPool
@@ -406,19 +426,31 @@ func (p *TokenizerPool) Close() error {
 	// Stop health checker
 	close(p.stopCh)
 
-	// Close all tokenizers
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	var tokenizersToClose []struct {
+		model string
+		tok   tokenizer.Tokenizer
+	}
 
+	// Collect all tokenizers under lock
+	p.mu.Lock()
 	for model, entry := range p.tokenizers {
-		if closer, ok := entry.tokenizer.(interface{ Close() error }); ok {
-			if err := closer.Close(); err != nil {
-				klog.Errorf("Error closing tokenizer for model %s: %v", model, err)
-			}
-		}
+		tokenizersToClose = append(tokenizersToClose, struct {
+			model string
+			tok   tokenizer.Tokenizer
+		}{model: model, tok: entry.tokenizer})
 	}
 	p.tokenizers = make(map[string]*tokenizerEntry)
 	p.metrics.activeTokenizers.Set(0)
+	p.mu.Unlock()
+
+	// Close tokenizers outside of lock
+	for _, item := range tokenizersToClose {
+		if closer, ok := item.tok.(interface{ Close() error }); ok {
+			if err := closer.Close(); err != nil {
+				klog.Errorf("Error closing tokenizer for model %s: %v", item.model, err)
+			}
+		}
+	}
 
 	return nil
 }

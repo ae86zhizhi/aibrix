@@ -126,12 +126,7 @@ func (p prefixCacheRouter) Route(ctx *types.RoutingContext, readyPodList types.P
 	// Get tokenizer - use pool only if vLLM remote tokenizer is enabled
 	var tokenizerObj tokenizer.Tokenizer
 	if enableVLLMRemoteTokenizer {
-		// Convert pod pointers to pod values for the tokenizer pool
-		podValues := make([]v1.Pod, len(readyPods))
-		for i, pod := range readyPods {
-			podValues[i] = *pod
-		}
-		tokenizerObj = p.tokenizerPool.GetTokenizer(ctx.Model, podValues)
+		tokenizerObj = p.tokenizerPool.GetTokenizer(ctx.Model, readyPods)
 	} else {
 		// Use the original tokenizer for backward compatibility
 		tokenizerObj = p.tokenizer
