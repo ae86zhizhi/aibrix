@@ -220,25 +220,18 @@ func TestMockZMQPublisher(t *testing.T) {
 	payload, err := msgpack.Marshal(batch)
 	require.NoError(t, err)
 
-	// Publish message
-	seq := make([]byte, 8)
-	binary.BigEndian.PutUint64(seq, 1)
-
-	_, err = publisher.SendBytes([]byte("test-topic"), zmq.SNDMORE)
-	require.NoError(t, err)
-	_, err = publisher.SendBytes(seq, zmq.SNDMORE)
-	require.NoError(t, err)
-	_, err = publisher.SendBytes(payload, 0)
-	require.NoError(t, err)
-
-	// Start client properly
+	// Start client before publishing to avoid race conditions in CI
+	// where messages sent before client starts might still be buffered
+	// and received, causing the test to receive 2 events instead of 1
 	err = client.Start()
 	assert.NoError(t, err)
 
 	// Wait for client to start consuming
 	time.Sleep(100 * time.Millisecond)
 
-	// Publish the event again after client has started
+	// Publish message after client has started
+	seq := make([]byte, 8)
+	binary.BigEndian.PutUint64(seq, 1)
 	_, err = publisher.SendBytes([]byte("test-topic"), zmq.SNDMORE)
 	require.NoError(t, err)
 	_, err = publisher.SendBytes(seq, zmq.SNDMORE)
