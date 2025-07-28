@@ -88,6 +88,7 @@ jobs:
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
     
@@ -115,10 +116,15 @@ jobs:
     - name: Build and load images
       run: |
         make docker-build-all
+        echo "Loading controller-manager image..."
         kind load docker-image aibrix/controller-manager:nightly
+        echo "Loading gateway-plugins image..."
         kind load docker-image aibrix/gateway-plugins:nightly
+        echo "Loading metadata-service image..."
         kind load docker-image aibrix/metadata-service:nightly
+        echo "Loading runtime image..."
         kind load docker-image aibrix/runtime:nightly
+        echo "Loading kvcache-watcher image..."
         kind load docker-image aibrix/kvcache-watcher:nightly
     
     - name: Deploy AIBrix
@@ -131,7 +137,8 @@ jobs:
       run: |
         cd development/app
         docker build -t aibrix/vllm-mock:nightly -f Dockerfile .
-        kind load docker-image aibrix/vllm-mock:nightly
+        # Load image only to worker node where vLLM pods will run
+        kind load docker-image aibrix/vllm-mock:nightly --nodes kind-worker
         cd ../..
     
     - name: Run E2E tests
