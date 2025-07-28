@@ -269,9 +269,13 @@ func TestKVSyncE2EPodLifecycle(t *testing.T) {
 	// Test 4: Scale Down
 	t.Log("Testing scale down...")
 	helper.ScaleDeployment(t, deployment.Name, 1)
-	time.Sleep(30 * time.Second) // Wait for scale down to complete
+	
+	// Wait for pods to actually terminate
+	require.Eventually(t, func() bool {
+		pods = helper.GetPodsByDeployment(t, deployment.Name)
+		return len(pods) == 1
+	}, 2*time.Minute, 5*time.Second, "Waiting for deployment to scale down to 1 pod")
 
-	pods = helper.GetPodsByDeployment(t, deployment.Name)
 	require.Equal(t, 1, len(pods), "Expected 1 pod after scale down")
 
 	// Verify indexer still has data from previous pods

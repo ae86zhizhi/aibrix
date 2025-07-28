@@ -81,9 +81,13 @@ func TestKVSyncE2EDeployment(t *testing.T) {
 		
 		// Scale down
 		helper.ScaleDeployment(t, deployment.Name, 2)
-		time.Sleep(30 * time.Second) // Wait for scale down
 		
-		pods = helper.GetPodsByDeployment(t, deployment.Name)
+		// Wait for pods to actually terminate
+		require.Eventually(t, func() bool {
+			pods = helper.GetPodsByDeployment(t, deployment.Name)
+			return len(pods) == 2
+		}, 2*time.Minute, 5*time.Second, "Waiting for deployment to scale down to 2 pods")
+		
 		require.Equal(t, 2, len(pods), "Expected 2 pods after scale down")
 	})
 
