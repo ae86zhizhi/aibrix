@@ -171,7 +171,7 @@ func (h *KVEventTestHelper) CreateVLLMPodWithKVEvents(t *testing.T, name string,
 							ReadinessProbe: &v1.Probe{
 								ProbeHandler: v1.ProbeHandler{
 									HTTPGet: &v1.HTTPGetAction{
-										Path:   "/health",
+										Path:   "/metrics",
 										Port:   intstr.FromInt(8000),
 										Scheme: v1.URISchemeHTTP,
 									},
