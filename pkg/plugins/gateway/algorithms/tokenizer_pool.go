@@ -35,6 +35,12 @@ const (
 	vllmEngine = "vllm"
 )
 
+var (
+	// Global metrics instance to avoid duplicate registration
+	tokenizerPoolMetrics     *TokenizerPoolMetrics
+	tokenizerPoolMetricsOnce sync.Once
+)
+
 // TokenizerPoolConfig represents configuration for the TokenizerPool
 type TokenizerPoolConfig struct {
 	EnableVLLMRemote     bool                // Feature flag
@@ -76,41 +82,49 @@ type TokenizerPoolMetrics struct {
 	tokenizerLatency           *prometheus.HistogramVec
 }
 
+// initMetrics initializes the global metrics instance once
+func initMetrics() {
+	tokenizerPoolMetricsOnce.Do(func() {
+		tokenizerPoolMetrics = &TokenizerPoolMetrics{
+			activeTokenizers: promauto.NewGauge(prometheus.GaugeOpts{
+				Name: "aibrix_tokenizer_pool_active_tokenizers",
+				Help: "Number of active tokenizers in the pool",
+			}),
+			tokenizerCreationSuccesses: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "aibrix_tokenizer_pool_creation_successes_total",
+				Help: "Total number of successful tokenizer creations",
+			}),
+			tokenizerCreationFailures: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "aibrix_tokenizer_pool_creation_failures_total",
+				Help: "Total number of failed tokenizer creations",
+			}),
+			unhealthyTokenizers: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "aibrix_tokenizer_pool_unhealthy_tokenizers_total",
+				Help: "Total number of times tokenizers were marked unhealthy",
+			}),
+			tokenizerRequests: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "aibrix_tokenizer_pool_requests_total",
+				Help: "Total number of tokenizer requests by model",
+			}, []string{"model"}),
+			tokenizerLatency: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "aibrix_tokenizer_pool_latency_seconds",
+				Help:    "Tokenizer request latency in seconds",
+				Buckets: prometheus.DefBuckets,
+			}, []string{"model"}),
+		}
+	})
+}
+
 // NewTokenizerPool creates a new TokenizerPool instance
 func NewTokenizerPool(config TokenizerPoolConfig, cache cache.Cache) *TokenizerPool {
-	metrics := &TokenizerPoolMetrics{
-		activeTokenizers: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "aibrix_tokenizer_pool_active_tokenizers",
-			Help: "Number of active tokenizers in the pool",
-		}),
-		tokenizerCreationSuccesses: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "aibrix_tokenizer_pool_creation_successes_total",
-			Help: "Total number of successful tokenizer creations",
-		}),
-		tokenizerCreationFailures: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "aibrix_tokenizer_pool_creation_failures_total",
-			Help: "Total number of failed tokenizer creations",
-		}),
-		unhealthyTokenizers: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "aibrix_tokenizer_pool_unhealthy_tokenizers_total",
-			Help: "Total number of times tokenizers were marked unhealthy",
-		}),
-		tokenizerRequests: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "aibrix_tokenizer_pool_requests_total",
-			Help: "Total number of tokenizer requests by model",
-		}, []string{"model"}),
-		tokenizerLatency: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "aibrix_tokenizer_pool_latency_seconds",
-			Help:    "Tokenizer request latency in seconds",
-			Buckets: prometheus.DefBuckets,
-		}, []string{"model"}),
-	}
+	// Initialize metrics once
+	initMetrics()
 
 	pool := &TokenizerPool{
 		tokenizers: make(map[string]*tokenizerEntry),
 		config:     config,
 		cache:      cache,
-		metrics:    metrics,
+		metrics:    tokenizerPoolMetrics,
 		stopCh:     make(chan struct{}),
 	}
 
