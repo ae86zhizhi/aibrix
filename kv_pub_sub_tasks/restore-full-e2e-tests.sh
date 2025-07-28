@@ -35,7 +35,25 @@ done
 echo "Restoring network connectivity validation..."
 sed -i '/if os\.Getenv("CI") == "true" {/,/return/d' test/e2e/kv_sync_helpers.go
 
+# Restore kv_sync_e2e_test.go additional changes
+echo "Restoring additional kv_sync_e2e_test.go changes..."
+# Remove CI skip conditions
+sed -i '/if os\.Getenv("CI") == "true" {/,/}/d' test/e2e/kv_sync_e2e_test.go
+# Restore scales
+sed -i 's/scales := \[\]int32{5, 10}  \/\/ Reduced for faster testing/scales := []int32{10, 50, 100}/g' test/e2e/kv_sync_e2e_test.go
+# Restore numPods
+sed -i 's/numPods := 2  \/\/ Reduced for faster testing/numPods := 3/g' test/e2e/kv_sync_e2e_test.go
+# Remove unique namespace timestamp
+sed -i 's/fmt\.Sprintf("%s-%d", kvEventsTestNamespace, time\.Now()\.Unix())/kvEventsTestNamespace/g' test/e2e/kv_sync_e2e_test.go
+# Restore 3 minute timeout for multi-pod test
+sed -i 's/helper\.WaitForDeploymentReady(t, deployment\.Name, 1\*time\.Minute)/helper.WaitForDeploymentReady(t, deployment.Name, 3*time.Minute)/g' test/e2e/kv_sync_e2e_test.go
+# Then restore other 2 minute timeouts
+sed -i 's/1\*time\.Minute/2*time.Minute/g' test/e2e/kv_sync_e2e_test.go
+# Fix the 3 minute one that got changed back
+sed -i '/numPods := 3/,/WaitForDeploymentReady/{s/2\*time\.Minute/3*time.Minute/}' test/e2e/kv_sync_e2e_test.go
+
 echo "Restoration complete! Remember to:"
 echo "1. Review the changes with 'git diff'"
 echo "2. Run tests locally to verify they work"
 echo "3. Consider keeping some optimizations that don't affect coverage"
+echo "4. Remove 'os' import from kv_sync_e2e_test.go if not needed"
