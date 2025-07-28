@@ -125,7 +125,7 @@ jobs:
       run: |
         kubectl apply -k config/dependency --server-side
         kubectl apply -k config/test
-        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=controller-manager -n aibrix-system --timeout=300s
+        kubectl wait --for=condition=ready pod -l control-plane=controller-manager -n aibrix-system --timeout=300s
     
     - name: Build mock vLLM image
       run: |
