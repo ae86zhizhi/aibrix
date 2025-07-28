@@ -92,7 +92,7 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -tags="zmq" $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 .PHONY: test-code-coverage
 test-code-coverage: test
@@ -100,7 +100,7 @@ test-code-coverage: test
 
 .PHONY: test-race-condition
 test-race-condition: manifests generate fmt vet envtest ## Run tests with race detection enabled.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -race $$(go list ./... | grep -v /e2e)
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -tags="zmq" -race $$(go list ./... | grep -v /e2e)
 
 .PHONY: test-integration
 test-integration: manifests fmt vet envtest ginkgo ## Run integration tests.
@@ -111,6 +111,41 @@ test-integration: manifests fmt vet envtest ginkgo ## Run integration tests.
 .PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
 test-e2e:
 	./test/run-e2e-tests.sh
+
+.PHONY: test-zmq
+test-zmq: manifests generate fmt vet ## Run ZMQ-related unit tests.
+	go test -v -tags="zmq" ./pkg/cache/kvcache/ -run "^TestZMQ.*" -count=1
+	go test -v -tags="zmq" ./pkg/utils/syncprefixcacheindexer/ -count=1
+
+.PHONY: test-kv-sync
+test-kv-sync: manifests generate fmt vet ## Run KV event sync tests.
+	go test -v -tags="zmq" ./pkg/cache/ -run "^Test.*KV.*" -count=1
+	go test -v -tags="zmq" ./test/integration/kv_event_sync_test.go -count=1
+
+.PHONY: test-zmq-coverage
+test-zmq-coverage: manifests generate fmt vet ## Run ZMQ tests with coverage.
+	go test -v -tags="zmq" -coverprofile=zmq_coverage.out \
+		./pkg/cache/kvcache/ \
+		./pkg/utils/syncprefixcacheindexer/ \
+		./pkg/cache/
+	go tool cover -html=zmq_coverage.out -o zmq_coverage.html
+	@echo "Coverage report generated: zmq_coverage.html"
+
+.PHONY: test-kv-sync-e2e
+test-kv-sync-e2e: ## Run KV sync E2E tests.
+	go test -v -tags="zmq" ./test/e2e/kv_sync_e2e_simple_test.go ./test/e2e/kv_sync_helpers.go ./test/e2e/util.go -timeout 30m
+
+.PHONY: test-kv-sync-benchmark
+test-kv-sync-benchmark: ## Run KV sync performance benchmarks.
+	go test -bench=. -benchmem -benchtime=10s -tags="zmq" ./test/benchmark/kv_sync_indexer_bench_test.go
+
+.PHONY: test-kv-sync-chaos
+test-kv-sync-chaos: ## Run KV sync chaos tests (requires Chaos Mesh).
+	go test -v -tags="zmq" ./test/chaos/chaos_simple_test.go -timeout 45m
+
+.PHONY: test-kv-sync-all
+test-kv-sync-all: test-zmq test-kv-sync test-kv-sync-e2e ## Run all KV sync tests (unit, integration, E2E).
+	@echo "All KV sync tests completed"
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter & yamllint

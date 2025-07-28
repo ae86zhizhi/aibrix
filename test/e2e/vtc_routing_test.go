@@ -68,9 +68,64 @@ var testUsers = []utils.User{
 }
 
 func TestMain(m *testing.M) {
-	redisClient = utils.GetRedisClient()
+	// Skip Redis initialization if E2E_SKIP_REDIS is set
+	if os.Getenv("E2E_SKIP_REDIS") == "true" {
+		fmt.Println("Skipping Redis connection for E2E tests")
+		os.Exit(m.Run())
+	}
+
+	// Print environment information for debugging
+	fmt.Println("=== E2E Test Environment ===")
+	fmt.Printf("REDIS_HOST: %s\n", os.Getenv("REDIS_HOST"))
+	fmt.Printf("REDIS_PORT: %s\n", os.Getenv("REDIS_PORT"))
+	fmt.Printf("Working Directory: %s\n", os.Getenv("PWD"))
+	
+	// Try to connect to Redis with retries
+	maxRetries := 30
+	retryDelay := 2 * time.Second
+	
+	for i := 0; i < maxRetries; i++ {
+		fmt.Printf("Attempting to connect to Redis (attempt %d/%d)...\n", i+1, maxRetries)
+		
+		// Try to create Redis client with custom connection logic
+		redisHost := os.Getenv("REDIS_HOST")
+		if redisHost == "" {
+			// Use 127.0.0.1 instead of localhost to avoid IPv6 issues
+			redisHost = "127.0.0.1"
+		}
+		redisPort := os.Getenv("REDIS_PORT")
+		if redisPort == "" {
+			redisPort = "6379"
+		}
+		redisPassword := os.Getenv("REDIS_PASSWORD")
+		
+		client := redis.NewClient(&redis.Options{
+			Addr:     redisHost + ":" + redisPort,
+			Password: redisPassword,
+			DB:       0,
+		})
+		
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		pong, pingErr := client.Ping(ctx).Result()
+		cancel()
+		
+		if pingErr == nil {
+			fmt.Printf("Successfully connected to Redis: %s\n", pong)
+			redisClient = client
+			break
+		}
+		
+		fmt.Printf("Failed to connect to Redis: %v\n", pingErr)
+		client.Close()
+		
+		if i < maxRetries-1 {
+			fmt.Printf("Retrying in %v...\n", retryDelay)
+			time.Sleep(retryDelay)
+		}
+	}
+	
 	if redisClient == nil {
-		fmt.Println("Failed to connect to Redis")
+		fmt.Println("Failed to connect to Redis after all retries")
 		os.Exit(1)
 	}
 

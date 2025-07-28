@@ -1,0 +1,69 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: kv-sync-zmq-port-block
+  namespace: kv-sync-test
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  direction: both
+  externalTargets:
+    - "0.0.0.0:5557"  # Block ZMQ events port
+    - "0.0.0.0:5558"  # Block ZMQ replay port
+  duration: "30s"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: kv-sync-zmq-connection-reset
+  namespace: kv-sync-test
+spec:
+  action: corrupt
+  mode: all
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  corrupt:
+    corrupt: "50"
+    correlation: "25"
+  duration: "60s"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: TimeChaos
+metadata:
+  name: kv-sync-time-skew
+  namespace: kv-sync-test
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  timeOffset: "30s"
+  duration: "120s"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HTTPChaos
+metadata:
+  name: kv-sync-api-delay
+  namespace: kv-sync-test
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  target: Request
+  port: 8000
+  method: ALL
+  delay: "2s"
+  duration: "60s"

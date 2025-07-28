@@ -25,7 +25,7 @@ import (
 )
 
 func GetRedisClient() *redis.Client {
-	redisHost := LoadEnv("REDIS_HOST", "localhost")
+	redisHost := LoadEnv("REDIS_HOST", "127.0.0.1")
 	redisPort := LoadEnv("REDIS_PORT", "6379")
 	redisPassword := LoadEnv("REDIS_PASSWORD", "")
 	// Connect to Redis
