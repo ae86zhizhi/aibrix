@@ -92,9 +92,10 @@ start_port_forwards() {
   # Start new port-forwards and store PIDs
   echo "Starting port-forwarding..."
   # Each port-forward runs in the background and its PID is saved
-  kubectl port-forward svc/llama2-7b 8000:8000 >/dev/null 2>&1 & echo $! >> /tmp/aibrix-port-forwards.pid
-  kubectl -n envoy-gateway-system port-forward service/envoy-aibrix-system-aibrix-eg-903790dc 8888:80 >/dev/null 2>&1 & echo $! >> /tmp/aibrix-port-forwards.pid
-  kubectl -n aibrix-system port-forward service/aibrix-redis-master 6379:6379 >/dev/null 2>&1 & echo $! >> /tmp/aibrix-port-forwards.pid
+  # Use --address 0.0.0.0 to listen on all interfaces (IPv4 and IPv6)
+  kubectl port-forward --address 0.0.0.0 svc/llama2-7b 8000:8000 >/dev/null 2>&1 & echo $! >> /tmp/aibrix-port-forwards.pid
+  kubectl -n envoy-gateway-system port-forward --address 0.0.0.0 service/envoy-aibrix-system-aibrix-eg-903790dc 8888:80 >/dev/null 2>&1 & echo $! >> /tmp/aibrix-port-forwards.pid
+  kubectl -n aibrix-system port-forward --address 0.0.0.0 service/aibrix-redis-master 6379:6379 >/dev/null 2>&1 & echo $! >> /tmp/aibrix-port-forwards.pid
 }
 
 # Comprehensive cleanup function that handles both k8s resources and port forwards

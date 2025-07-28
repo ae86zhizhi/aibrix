@@ -84,7 +84,8 @@ func TestMain(m *testing.M) {
 		// Try to create Redis client with custom connection logic
 		redisHost := os.Getenv("REDIS_HOST")
 		if redisHost == "" {
-			redisHost = "localhost"
+			// Use 127.0.0.1 instead of localhost to avoid IPv6 issues
+			redisHost = "127.0.0.1"
 		}
 		redisPort := os.Getenv("REDIS_PORT")
 		if redisPort == "" {
