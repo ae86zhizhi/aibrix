@@ -151,6 +151,14 @@ jobs:
         kind load docker-image aibrix/vllm-mock:nightly --nodes kind-worker
         cd ../..
     
+    - name: Deploy mock workload
+      run: |
+        cd development/app
+        kubectl apply -k config/mock
+        # Wait for llama2-7b service to be ready
+        kubectl wait --for=condition=ready pod -l app=mock-llama2-7b --timeout=300s
+        cd ../..
+    
     - name: Setup port-forwarding
       run: |
         # Setup port-forwarding for services required by E2E tests
