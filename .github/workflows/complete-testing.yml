@@ -69,13 +69,14 @@ jobs:
     
     - name: Run integration tests
       run: |
-        go test -v -tags="zmq" ./test/integration/kv_event_sync_test.go
+        # Run only the kv_event_sync tests (exclude webhook tests that need kubebuilder)
+        go test -v -tags="zmq" github.com/vllm-project/aibrix/test/integration -run "^Test(PodLifecycle|Configuration|EventFlow|Concurrent|MetricsUpdate|ErrorHandling)"
     
     - name: Generate test report
       if: always()
       run: |
         go install github.com/jstemmer/go-junit-report/v2@latest
-        go test -v -tags="zmq" ./test/integration/... 2>&1 | go-junit-report -set-exit-code > integration-test-report.xml
+        go test -v -tags="zmq" github.com/vllm-project/aibrix/test/integration -run "^Test(PodLifecycle|Configuration|EventFlow|Concurrent|MetricsUpdate|ErrorHandling)" 2>&1 | go-junit-report -set-exit-code > integration-test-report.xml
     
     - name: Upload test report
       if: always()
