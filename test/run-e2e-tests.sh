@@ -86,16 +86,57 @@ kill_existing_port_forwards() {
 
 # Start port forwarding and store PIDs
 start_port_forwards() {
+  # Check if port-forward is already running
+  echo "Checking if port-forward is already running..."
+  if nc -zv 127.0.0.1 6379 2>/dev/null; then
+    echo "Redis port-forward is already running on 127.0.0.1:6379"
+    return 0
+  fi
+
   # Kill any existing port-forwards first
   kill_existing_port_forwards
+
+  # Check if Redis service exists
+  echo "Checking Redis service..."
+  kubectl -n aibrix-system get service aibrix-redis-master || {
+    echo "ERROR: Redis service not found!"
+    kubectl -n aibrix-system get services
+    return 1
+  }
 
   # Start new port-forwards and store PIDs
   echo "Starting port-forwarding..."
   # Each port-forward runs in the background and its PID is saved
-  # Use --address 0.0.0.0 to listen on all interfaces (IPv4 and IPv6)
-  kubectl port-forward --address 0.0.0.0 svc/llama2-7b 8000:8000 >/dev/null 2>&1 & echo $! >> /tmp/aibrix-port-forwards.pid
-  kubectl -n envoy-gateway-system port-forward --address 0.0.0.0 service/envoy-aibrix-system-aibrix-eg-903790dc 8888:80 >/dev/null 2>&1 & echo $! >> /tmp/aibrix-port-forwards.pid
-  kubectl -n aibrix-system port-forward --address 0.0.0.0 service/aibrix-redis-master 6379:6379 >/dev/null 2>&1 & echo $! >> /tmp/aibrix-port-forwards.pid
+  # Remove --address flag as it may cause issues in CI
+  kubectl port-forward svc/llama2-7b 8000:8000 >/tmp/llama-pf.log 2>&1 & echo $! >> /tmp/aibrix-port-forwards.pid
+  kubectl -n envoy-gateway-system port-forward service/envoy-aibrix-system-aibrix-eg-903790dc 8888:80 >/tmp/envoy-pf.log 2>&1 & echo $! >> /tmp/aibrix-port-forwards.pid
+  kubectl -n aibrix-system port-forward service/aibrix-redis-master 6379:6379 >/tmp/redis-pf.log 2>&1 & echo $! >> /tmp/aibrix-port-forwards.pid
+  
+  # Give port-forwards time to establish
+  echo "Waiting for port-forwards to establish..."
+  sleep 10
+  
+  # Check if port-forwards are running
+  echo "Checking port-forward processes..."
+  for pid in $(cat /tmp/aibrix-port-forwards.pid); do
+    if ps -p $pid > /dev/null; then
+      echo "Port-forward process $pid is running"
+    else
+      echo "WARNING: Port-forward process $pid is NOT running"
+      # Show logs for debugging
+      echo "Redis port-forward log:"
+      cat /tmp/redis-pf.log || true
+    fi
+  done
+  
+  # Test Redis connectivity
+  echo "Testing Redis connectivity..."
+  nc -zv 127.0.0.1 6379 || {
+    echo "ERROR: Cannot connect to Redis on 127.0.0.1:6379"
+    echo "Redis port-forward log:"
+    cat /tmp/redis-pf.log || true
+    return 1
+  }
 }
 
 # Comprehensive cleanup function that handles both k8s resources and port forwards
@@ -135,10 +176,6 @@ trap "collect_logs" ERR
 
 # Start port forwarding before running tests
 start_port_forwards
-
-# Wait for port-forwards to be established
-echo "Waiting for port-forwards to be established..."
-sleep 5
 
 # Run tests using gotestsum
 # The test exit code is captured and used as the script's exit code

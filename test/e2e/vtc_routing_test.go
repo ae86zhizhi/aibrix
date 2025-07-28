@@ -74,6 +74,12 @@ func TestMain(m *testing.M) {
 		os.Exit(m.Run())
 	}
 
+	// Print environment information for debugging
+	fmt.Println("=== E2E Test Environment ===")
+	fmt.Printf("REDIS_HOST: %s\n", os.Getenv("REDIS_HOST"))
+	fmt.Printf("REDIS_PORT: %s\n", os.Getenv("REDIS_PORT"))
+	fmt.Printf("Working Directory: %s\n", os.Getenv("PWD"))
+	
 	// Try to connect to Redis with retries
 	maxRetries := 30
 	retryDelay := 2 * time.Second
