@@ -131,7 +131,17 @@ jobs:
       run: |
         kubectl apply -k config/dependency --server-side
         kubectl apply -k config/test
+        
+        # Wait for Redis to be ready first as it's a dependency for E2E tests
+        echo "Waiting for Redis to be ready..."
+        kubectl wait --for=condition=ready pod -l app=redis,role=master -n aibrix-system --timeout=300s
+        
+        # Wait for controller-manager
         kubectl wait --for=condition=ready pod -l control-plane=controller-manager -n aibrix-system --timeout=300s
+        
+        # Show pod status for debugging
+        echo "Pod status in aibrix-system namespace:"
+        kubectl get pods -n aibrix-system
     
     - name: Build mock vLLM image
       run: |
@@ -140,6 +150,27 @@ jobs:
         # Load image only to worker node where vLLM pods will run
         kind load docker-image aibrix/vllm-mock:nightly --nodes kind-worker
         cd ../..
+    
+    - name: Setup port-forwarding
+      run: |
+        # Setup port-forwarding for services required by E2E tests
+        echo "Setting up port-forwarding..."
+        kubectl port-forward svc/llama2-7b 8000:8000 >/tmp/llama-pf.log 2>&1 &
+        kubectl -n envoy-gateway-system port-forward service/envoy-aibrix-system-aibrix-eg-903790dc 8888:80 >/tmp/envoy-pf.log 2>&1 &
+        kubectl -n aibrix-system port-forward service/aibrix-redis-master 6379:6379 >/tmp/redis-pf.log 2>&1 &
+        
+        # Wait for port-forwards to establish
+        sleep 10
+        
+        # Test Redis connectivity
+        echo "Testing Redis connectivity..."
+        nc -zv 127.0.0.1 6379 || {
+          echo "ERROR: Cannot connect to Redis on 127.0.0.1:6379"
+          echo "Redis port-forward log:"
+          cat /tmp/redis-pf.log || true
+          exit 1
+        }
+        echo "Redis is accessible on 127.0.0.1:6379"
     
     - name: Run E2E tests
       run: |

@@ -100,8 +100,19 @@ start_port_forwards() {
   echo "Checking Redis service..."
   kubectl -n aibrix-system get service aibrix-redis-master || {
     echo "ERROR: Redis service not found!"
+    echo "Available services in aibrix-system namespace:"
     kubectl -n aibrix-system get services
+    echo "All pods in aibrix-system namespace:"
+    kubectl -n aibrix-system get pods
     return 1
+  }
+  
+  # Check Redis pod status
+  echo "Checking Redis pod status..."
+  kubectl -n aibrix-system get pods -l app=redis,role=master || {
+    echo "ERROR: Redis pod not found!"
+    echo "All pods in aibrix-system namespace:"
+    kubectl -n aibrix-system get pods
   }
 
   # Start new port-forwards and store PIDs

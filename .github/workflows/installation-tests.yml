@@ -170,7 +170,20 @@ jobs:
         run: |
           sleep 45s
           kubectl get pods --all-namespaces
+          
+          # Specifically wait for Redis to be ready
+          echo "Waiting for Redis to be ready..."
+          kubectl wait --for=condition=ready pod -l app=redis,role=master -n aibrix-system --timeout=300s
+          
+          # Then wait for all other pods
           kubectl wait pod --all --for=condition=ready --all-namespaces --timeout=300s
+          
+          # Verify Redis service exists
+          echo "Verifying Redis service..."
+          kubectl -n aibrix-system get service aibrix-redis-master
+          
+          # Add a small delay to ensure services are fully initialized
+          sleep 5
 
           kubectl port-forward svc/llama2-7b 8000:8000 &
           kubectl -n envoy-gateway-system port-forward service/envoy-aibrix-system-aibrix-eg-903790dc  8888:80 &
