@@ -135,6 +135,10 @@ trap "collect_logs" ERR
 # Start port forwarding before running tests
 start_port_forwards
 
+# Wait for port-forwards to be established
+echo "Waiting for port-forwards to be established..."
+sleep 5
+
 # Run tests using gotestsum
 # The test exit code is captured and used as the script's exit code
 # so CI can detect failures
