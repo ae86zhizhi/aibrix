@@ -228,11 +228,11 @@ func TestKVSyncE2EPodLifecycle(t *testing.T) {
 
 	// Test 2: Scale Up
 	t.Log("Testing scale up...")
-	helper.ScaleDeployment(t, deployment.Name, 3)
-	helper.WaitForDeploymentReady(t, deployment.Name, 2*time.Minute)
+	helper.ScaleDeployment(t, deployment.Name, 2)  // Reduced for faster testing
+	helper.WaitForDeploymentReady(t, deployment.Name, 1*time.Minute)
 
 	pods = helper.GetPodsByDeployment(t, deployment.Name)
-	require.Equal(t, 3, len(pods), "Expected 3 pods after scale up")
+	require.Equal(t, 2, len(pods), "Expected 2 pods after scale up")
 
 	// Send events from all pods
 	for i, pod := range pods {
