@@ -138,12 +138,6 @@ func TestKVSyncE2EConnectivity(t *testing.T) {
 func TestKVSyncE2ESimpleLargeScale(t *testing.T) {
 	// Temporarily skip large scale tests to speed up debugging
 	t.Skip("Temporarily skipping large scale tests for faster debugging")
-	return
-	
-	// Skip in CI due to resource constraints
-	if testing.Short() {
-		t.Skip("Skipping large scale test in short mode")
-	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
