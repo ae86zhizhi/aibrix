@@ -1,0 +1,113 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aibrix-model.fullname" . }}
+  labels:
+    {{- include "aibrix-model.labels" . | nindent 4 }}
+    model.aibrix.ai/name: {{ .Values.model.servedModelName }}
+    model.aibrix.ai/port: "{{ .Values.model.port }}"
+    {{- if .Values.model.kvEvents.enabled }}
+    model.aibrix.ai/kv-events-enabled: "true"
+    {{- end }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "aibrix-model.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "aibrix-model.selectorLabels" . | nindent 8 }}
+        model.aibrix.ai/name: {{ .Values.model.servedModelName }}
+        {{- if .Values.model.kvEvents.enabled }}
+        model.aibrix.ai/kv-events-enabled: "true"
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "aibrix-model.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: vllm-openai
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag |
+            default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - python3
+            - -m
+            - vllm.entrypoints.openai.api_server
+            - --host
+            - "{{ .Values.model.host }}"
+            - --port
+            - "{{ .Values.model.port }}"
+            - --uvicorn-log-level
+            - "{{ .Values.model.uvicornLogLevel }}"
+            - --model
+            - "{{ .Values.model.huggingfaceName }}"
+            - --served-model-name
+            - "{{ .Values.model.servedModelName }}"
+            - --max-model-len
+            - "{{ .Values.model.maxModelLen }}"
+            {{- if .Values.model.kvEvents.enabled }}
+            # KV event publishing configuration
+            - --enable-kv-cache-events
+            - --kv-events-publisher
+            - {{ .Values.model.kvEvents.publisherType }}
+            - --kv-events-endpoint
+            - "tcp://*:{{ .Values.model.kvEvents.eventPort }}"
+            - --kv-events-replay-endpoint
+            - "tcp://*:{{ .Values.model.kvEvents.replayPort }}"
+            - --kv-events-buffer-steps
+            - "{{ .Values.model.kvEvents.bufferSteps }}"
+            {{- end }}
+          env:
+            {{- if .Values.model.kvEvents.enabled }}
+            # KV events high water mark configuration
+            - name: VLLM_KV_EVENTS_HWM
+              value: "{{ .Values.model.kvEvents.hwm }}"
+            {{- end }}
+          ports:
+            - name: api
+              containerPort: {{ .Values.model.port }}
+              protocol: TCP
+            {{- if .Values.model.kvEvents.enabled }}
+            # KV event ports
+            - name: kv-events
+              containerPort: {{ .Values.model.kvEvents.eventPort }}
+              protocol: TCP
+            - name: kv-replay
+              containerPort: {{ .Values.model.kvEvents.replayPort }}
+              protocol: TCP
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.healthCheck.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.healthCheck.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.healthCheck.startupProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

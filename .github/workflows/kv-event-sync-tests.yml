@@ -1,0 +1,99 @@
+name: KV Event Sync Tests
+
+on:
+  workflow_dispatch:  # Allows manual trigger
+  push:
+    branches: [ "main", "release-*", "feature/all-dev", "feature/kv-event-pub-sub" ]
+    paths:
+      - '.github/workflows/kv-event-sync-tests.yml'
+      - 'pkg/cache/kvcache/**'
+      - 'pkg/cache/kv_event_*.go'
+      - 'pkg/utils/syncprefixcacheindexer/**'
+      - 'test/integration/kv_event_sync_test.go'
+      - 'go.mod'
+      - 'go.sum'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - '.github/workflows/kv-event-sync-tests.yml'
+      - 'pkg/cache/kvcache/**'
+      - 'pkg/cache/kv_event_*.go'
+      - 'pkg/utils/syncprefixcacheindexer/**'
+      - 'test/integration/kv_event_sync_test.go'
+      - 'go.mod'
+      - 'go.sum'
+
+jobs:
+  test-kv-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
+      
+      - name: Install ZMQ dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libzmq3-dev
+      
+      - name: Run ZMQ Client Unit Tests
+        run: |
+          go test -v -tags="zmq" ./pkg/cache/kvcache/ -run "^TestZMQ.*" -count=1
+      
+      - name: Run Sync Indexer Unit Tests
+        run: |
+          go test -v -tags="zmq" ./pkg/utils/syncprefixcacheindexer/ -count=1
+      
+      - name: Run KV Event Manager Unit Tests
+        run: |
+          go test -v -tags="zmq" ./pkg/cache/ -run "^Test.*KV.*" -count=1
+      
+      - name: Run KV Event Sync Integration Tests
+        run: |
+          go test -v -tags="zmq" ./test/integration/ -run "kv_event_sync_test.go" -count=1
+      
+      - name: Generate Coverage Report
+        run: |
+          go test -v -tags="zmq" -coverprofile=zmq_coverage.out \
+            ./pkg/cache/kvcache/ \
+            ./pkg/utils/syncprefixcacheindexer/ \
+            ./pkg/cache/
+          go tool cover -html=zmq_coverage.out -o zmq_coverage.html
+      
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zmq-coverage-report
+          path: |
+            zmq_coverage.out
+            zmq_coverage.html
+          retention-days: 7
+
+  test-sync-with-build-tags:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build_tag: ["zmq", "!nozmq"]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
+      
+      - name: Install ZMQ dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libzmq3-dev
+      
+      - name: Run Tests with Build Tag ${{ matrix.build_tag }}
+        run: |
+          echo "Running tests with build tag: ${{ matrix.build_tag }}"
+          go test -v -tags="${{ matrix.build_tag }}" ./pkg/cache/kvcache/ -count=1
+          go test -v -tags="${{ matrix.build_tag }}" ./pkg/utils/syncprefixcacheindexer/ -count=1

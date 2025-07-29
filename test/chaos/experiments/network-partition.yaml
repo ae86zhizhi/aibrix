@@ -1,0 +1,78 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: kv-sync-network-partition
+  namespace: kv-sync-test
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  direction: both
+  target:
+    mode: all
+    selector:
+      namespaces:
+        - aibrix-system
+      labelSelectors:
+        "app.kubernetes.io/name": "gateway"
+  duration: "30s"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: kv-sync-packet-loss
+  namespace: kv-sync-test
+spec:
+  action: loss
+  mode: all
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  loss:
+    loss: "50"
+    correlation: "25"
+  duration: "60s"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: kv-sync-network-delay
+  namespace: kv-sync-test
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  delay:
+    latency: "500ms"
+    correlation: "25"
+    jitter: "100ms"
+  duration: "60s"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: kv-sync-bandwidth-limit
+  namespace: kv-sync-test
+spec:
+  action: bandwidth
+  mode: all
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  bandwidth:
+    rate: "1mbps"
+    limit: 100000
+    buffer: 10000
+  duration: "60s"

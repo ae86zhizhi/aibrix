@@ -2,7 +2,7 @@ name: Python AIBrix KVCache Tests
 
 on:
   push:
-    branches: [ "main", "release-*" ]
+    branches: [ "main", "release-*", "feature/kv-event-pub-sub" ]
     paths:
       - 'python/aibrix_kvcache/**'
   pull_request:
