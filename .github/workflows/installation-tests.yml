@@ -170,16 +170,48 @@ jobs:
         run: |
           sleep 45s
           kubectl get pods --all-namespaces
+          
+          # Specifically wait for Redis to be ready
+          echo "Waiting for Redis to be ready..."
+          kubectl wait --for=condition=ready pod -l app=redis,role=master -n aibrix-system --timeout=300s
+          
+          # Then wait for all other pods
           kubectl wait pod --all --for=condition=ready --all-namespaces --timeout=300s
-
-          kubectl port-forward svc/llama2-7b 8000:8000 &
-          kubectl -n envoy-gateway-system port-forward service/envoy-aibrix-system-aibrix-eg-903790dc  8888:80 &
-          kubectl -n aibrix-system port-forward service/aibrix-redis-master 6379:6379 &
+          
+          # Verify Redis service exists
+          echo "Verifying Redis service..."
+          kubectl -n aibrix-system get service aibrix-redis-master
+          
+          # Add a small delay to ensure services are fully initialized
+          sleep 5
+          
+          # Port-forwards would be lost between steps, so we don't set them up here
 
       - name: Run e2e tests
         run: |
           kind get kubeconfig --name installation-test > /tmp/admin.conf
           export KUBECONFIG=/tmp/admin.conf
+          
+          # Port-forwards from previous step don't persist, so we need to set them up again
+          echo "Setting up port-forwards for E2E tests..."
+          kubectl port-forward svc/llama2-7b 8000:8000 >/tmp/llama-pf.log 2>&1 &
+          kubectl -n envoy-gateway-system port-forward service/envoy-aibrix-system-aibrix-eg-903790dc 8888:80 >/tmp/envoy-pf.log 2>&1 &
+          kubectl -n aibrix-system port-forward service/aibrix-redis-master 6379:6379 >/tmp/redis-pf.log 2>&1 &
+          
+          # Wait for port-forwards to establish
+          echo "Waiting for port-forwards to establish..."
+          sleep 10
+          
+          # Verify Redis connectivity
+          echo "Verifying Redis connectivity..."
+          nc -zv 127.0.0.1 6379 || {
+            echo "ERROR: Cannot connect to Redis"
+            echo "Redis port-forward log:"
+            cat /tmp/redis-pf.log || true
+            exit 1
+          }
+          
+          # Now run the tests
           make test-e2e
 
       - name: Clean up

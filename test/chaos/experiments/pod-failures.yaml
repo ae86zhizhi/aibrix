@@ -1,0 +1,85 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: kv-sync-pod-kill
+  namespace: kv-sync-test
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  duration: "60s"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: kv-sync-pod-failure
+  namespace: kv-sync-test
+spec:
+  action: pod-failure
+  mode: fixed-percent
+  value: "50"
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  duration: "90s"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: kv-sync-cpu-stress
+  namespace: kv-sync-test
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  stressors:
+    cpu:
+      workers: 2
+      load: 80
+  duration: "60s"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: kv-sync-memory-stress
+  namespace: kv-sync-test
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  stressors:
+    memory:
+      workers: 2
+      size: "512MB"
+  duration: "60s"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: IOChaos
+metadata:
+  name: kv-sync-io-stress
+  namespace: kv-sync-test
+spec:
+  action: latency
+  mode: all
+  selector:
+    namespaces:
+      - kv-sync-test
+    labelSelectors:
+      "model.aibrix.ai/kv-events-enabled": "true"
+  volumePath: /tmp
+  path: "*"
+  delay: "100ms"
+  percent: 50
+  duration: "60s"
