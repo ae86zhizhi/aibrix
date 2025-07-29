@@ -1,0 +1,50 @@
+[
+  {
+    "name": "KVEventProcessingLatency",
+    "timestamp": "2024-01-01T00:00:00Z",
+    "duration": "1m0s",
+    "metrics": {
+      "event_processing_latency": 500000,
+      "routing_decision_latency": 100000,
+      "events_per_second": 10000,
+      "memory_usage_mb": 50,
+      "cpu_usage_percent": 20,
+      "network_bandwidth_mbps": 10,
+      "concurrent_connections": 100,
+      "total_events_processed": 600000,
+      "error_rate": 0.01
+    }
+  },
+  {
+    "name": "KVEventThroughput",
+    "timestamp": "2024-01-01T00:00:00Z",
+    "duration": "1m0s",
+    "metrics": {
+      "event_processing_latency": 0,
+      "routing_decision_latency": 0,
+      "events_per_second": 10000,
+      "memory_usage_mb": 100,
+      "cpu_usage_percent": 50,
+      "network_bandwidth_mbps": 20,
+      "concurrent_connections": 200,
+      "total_events_processed": 600000,
+      "error_rate": 0.01
+    }
+  },
+  {
+    "name": "KVEventMemoryUsage",
+    "timestamp": "2024-01-01T00:00:00Z",
+    "duration": "1m0s",
+    "metrics": {
+      "event_processing_latency": 0,
+      "routing_decision_latency": 0,
+      "events_per_second": 5000,
+      "memory_usage_mb": 100,
+      "cpu_usage_percent": 10,
+      "network_bandwidth_mbps": 5,
+      "concurrent_connections": 50,
+      "total_events_processed": 300000,
+      "error_rate": 0.001
+    }
+  }
+]

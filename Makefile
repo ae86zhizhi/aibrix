@@ -57,7 +57,7 @@ help: ## Display this help.
 ##@ Development
 
 GINKGO_VERSION ?= $(shell go list -m -f '{{.Version}}' github.com/onsi/ginkgo/v2)
-INTEGRATION_TARGET ?= ./test/integration/...
+INTEGRATION_TARGET ?= ./test/integration/webhook/...
 
 GINKGO = $(shell pwd)/bin/ginkgo
 .PHONY: ginkgo
@@ -102,15 +102,67 @@ test-code-coverage: test
 test-race-condition: manifests generate fmt vet envtest ## Run tests with race detection enabled.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -race $$(go list ./... | grep -v /e2e)
 
-.PHONY: test-integration
-test-integration: manifests fmt vet envtest ginkgo ## Run integration tests.
+# Default integration tests (do not require ZMQ)
+.PHONY: test-integration-default
+test-integration-default: manifests fmt vet envtest ginkgo ## Run default integration tests (no ZMQ required).
+	@echo "--- Running Default Integration Tests ---"
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
-	$(GINKGO) --junit-report=junit.xml --output-dir=$(ARTIFACTS) -v $(INTEGRATION_TARGET)
+	$(GINKGO) --junit-report=junit-default.xml --output-dir=$(ARTIFACTS) -v ./test/integration/webhook/...
+
+# ZMQ-specific integration tests
+.PHONY: test-integration-zmq
+test-integration-zmq: manifests fmt vet envtest ginkgo ## Run ZMQ-specific integration tests.
+	@echo "--- Running ZMQ Integration Tests ---"
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	$(GINKGO) --junit-report=junit-zmq.xml --output-dir=$(ARTIFACTS) -v -tags="zmq" ./test/integration/...
+
+# Run all integration tests (default + ZMQ)
+.PHONY: test-integration
+test-integration: test-integration-default test-integration-zmq ## Run all integration tests (default + ZMQ).
 
 # Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
 .PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
 test-e2e:
 	./test/run-e2e-tests.sh
+
+.PHONY: test-zmq
+test-zmq: manifests generate fmt vet ## Run ZMQ-related unit tests.
+	go test -v -tags="zmq" ./pkg/cache/kvcache/ -run "^TestZMQ.*" -count=1
+	go test -v -tags="zmq" ./pkg/utils/syncprefixcacheindexer/ -count=1
+
+.PHONY: test-kv-sync
+test-kv-sync: manifests generate fmt vet ## Run KV event sync tests.
+	go test -v -tags="zmq" ./pkg/cache/ -run "^Test.*KV.*" -count=1
+	go test -v -tags="zmq" ./test/integration/kv_event_sync_test.go -count=1
+
+.PHONY: test-zmq-coverage
+test-zmq-coverage: manifests generate fmt vet ## Run ZMQ tests with coverage.
+	go test -v -tags="zmq" -coverprofile=zmq_coverage.out \
+		./pkg/cache/kvcache/ \
+		./pkg/utils/syncprefixcacheindexer/ \
+		./pkg/cache/
+	go tool cover -html=zmq_coverage.out -o zmq_coverage.html
+	@echo "Coverage report generated: zmq_coverage.html"
+
+.PHONY: test-kv-sync-e2e
+test-kv-sync-e2e: ## Run KV sync E2E tests.
+	go test -v -tags="zmq" ./test/e2e/kv_sync_e2e_simple_test.go ./test/e2e/kv_sync_helpers.go ./test/e2e/util.go -timeout 30m
+
+.PHONY: test-kv-sync-benchmark
+test-kv-sync-benchmark: ## Run KV sync performance benchmarks.
+	go test -bench=. -benchmem -benchtime=10s -tags="zmq" ./test/benchmark/kv_sync_indexer_bench_test.go
+
+.PHONY: test-kv-sync-chaos
+test-kv-sync-chaos: ## Run KV sync chaos tests (requires Chaos Mesh).
+	go test -v -tags="zmq" ./test/chaos/chaos_simple_test.go -timeout 45m
+
+.PHONY: test-kv-sync-all
+test-kv-sync-all: test-zmq test-kv-sync test-kv-sync-e2e ## Run all KV sync tests (unit, integration, E2E).
+	@echo "All KV sync tests completed"
+
+.PHONY: test-with-zmq
+test-with-zmq: manifests generate fmt vet envtest ## Run full test suite with ZMQ support.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -tags="zmq" $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter & yamllint
@@ -142,6 +194,17 @@ lint-all: licensecheck lint
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/controllers/main.go
 
+.PHONY: build-controller-manager
+build-controller-manager: manifests generate fmt vet ## Build controller-manager binary without ZMQ.
+	CGO_ENABLED=0 go build -tags="nozmq" -o bin/controller-manager cmd/controllers/main.go
+
+.PHONY: build-gateway-plugins
+build-gateway-plugins: manifests generate fmt vet ## Build gateway-plugins binary with ZMQ.
+	CGO_ENABLED=1 go build -tags="zmq" -o bin/gateway-plugins cmd/plugins/main.go
+
+.PHONY: build-metadata-service
+build-metadata-service: manifests generate fmt vet ## Build metadata-service binary without ZMQ.
+	CGO_ENABLED=0 go build -o bin/metadata-service cmd/metadata/main.go
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/controllers/main.go
@@ -401,6 +464,14 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+# Helper target to verify all images use distroless
+.PHONY: verify-distroless
+verify-distroless: ## Verify all images use distroless base
+	@echo "Verifying all images use distroless base..."
+	@docker inspect $(AIBRIX_CONTAINER_REGISTRY_NAMESPACE)/aibrix-controller-manager:$(IMG_TAG) | grep -q "gcr.io/distroless/static" && echo "✓ controller-manager" || echo "✗ controller-manager"
+	@docker inspect $(AIBRIX_CONTAINER_REGISTRY_NAMESPACE)/aibrix-gateway-plugins:$(IMG_TAG) | grep -q "gcr.io/distroless/static" && echo "✓ gateway-plugins" || echo "✗ gateway-plugins"
+	@docker inspect $(AIBRIX_CONTAINER_REGISTRY_NAMESPACE)/aibrix-metadata-service:$(IMG_TAG) | grep -q "gcr.io/distroless/static" && echo "✓ metadata-service" || echo "✗ metadata-service"
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.

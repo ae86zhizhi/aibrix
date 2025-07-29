@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -71,22 +72,27 @@ var _ = BeforeSuite(func() {
 
 	By("bootstrapping test environment")
 
-	testEnv = &envtest.Environment{
+	// Check if KUBEBUILDER_ASSETS is set (by make test)
+	kubebuilderAssets := os.Getenv("KUBEBUILDER_ASSETS")
+
+	testEnvConfig := &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
-
-		// The BinaryAssetsDirectory is only required if you want to run the tests directly
-		// without call the makefile target test. If not informed it will look for the
-		// default path defined in controller-runtime which is /usr/local/kubebuilder/.
-		// Note that you must have the required binaries setup under the bin directory to perform
-		// the tests directly. When we run make test it will be setup and used automatically.
-		BinaryAssetsDirectory: filepath.Join("..", "..", "..", "bin", "k8s",
-			fmt.Sprintf("1.30.0-%s-%s", runtime.GOOS, runtime.GOARCH)),
 
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
 			Paths: []string{filepath.Join("..", "..", "..", "config", "webhook")},
 		},
 	}
+
+	// Only set BinaryAssetsDirectory if KUBEBUILDER_ASSETS is not set
+	// When run via make test, KUBEBUILDER_ASSETS will be set and BinaryAssetsDirectory should be empty
+	if kubebuilderAssets == "" {
+		// Use 1.29.0 to match the Makefile's ENVTEST_K8S_VERSION
+		testEnvConfig.BinaryAssetsDirectory = filepath.Join("..", "..", "..", "bin", "k8s",
+			fmt.Sprintf("1.29.0-%s-%s", runtime.GOOS, runtime.GOARCH))
+	}
+
+	testEnv = testEnvConfig
 
 	var err error
 	// cfg is defined in this file globally.
