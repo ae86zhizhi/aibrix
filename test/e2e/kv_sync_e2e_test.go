@@ -1,3 +1,6 @@
+//go:build zmq
+// +build zmq
+
 /*
 Copyright 2024 The Aibrix Team.
 
