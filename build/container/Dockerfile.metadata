@@ -1,21 +1,13 @@
-# Build the manager binary
+# Build stage - metadata-service specific
 FROM golang:1.22 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
 WORKDIR /workspace
 
-# Install ZMQ dependencies
-RUN apt-get update && apt-get install -y \
-    libzmq3-dev \
-    pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-
 # Copy the Go Modules manifests
-COPY go.mod go.mod
-COPY go.sum go.sum
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
+COPY go.mod go.sum ./
+# Cache deps before building and copying source
 RUN go mod download
 
 # Copy the go source
@@ -23,27 +15,17 @@ COPY cmd/ cmd/
 COPY api/ api/
 COPY pkg/ pkg/
 
-# Build with CGO enabled for ZMQ support
-# the GOARCH has not a default value to allow the binary be built according to the host where the command
-# was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
-# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
-# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -tags zmq -a -o metadata-service cmd/metadata/main.go
+# Build WITHOUT zmq for metadata-service
+# CGO_ENABLED=0 for static binary, nozmq build tag to exclude ZMQ dependencies
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+    -tags="nozmq" \
+    -ldflags="-w -s" \
+    -a -o metadata-service cmd/metadata/main.go
 
-# Use debian-slim as base image since we need ZMQ libraries at runtime
-FROM debian:bookworm-slim
-
-# Install ZMQ runtime dependencies
-RUN apt-get update && apt-get install -y \
-    libzmq5 \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
+# Runtime stage - use distroless for minimal footprint
+FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/metadata-service .
-
-# Create non-root user
-RUN useradd -u 65532 -U nonroot
 USER 65532:65532
 
 ENTRYPOINT ["/metadata-service"]

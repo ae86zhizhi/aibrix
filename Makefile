@@ -177,6 +177,17 @@ lint-all: licensecheck lint
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/controllers/main.go
 
+.PHONY: build-controller-manager
+build-controller-manager: manifests generate fmt vet ## Build controller-manager binary without ZMQ.
+	CGO_ENABLED=0 go build -tags="nozmq" -o bin/controller-manager cmd/controllers/main.go
+
+.PHONY: build-gateway-plugins
+build-gateway-plugins: manifests generate fmt vet ## Build gateway-plugins binary with ZMQ.
+	CGO_ENABLED=1 go build -tags="zmq" -o bin/gateway-plugins cmd/plugins/main.go
+
+.PHONY: build-metadata-service
+build-metadata-service: manifests generate fmt vet ## Build metadata-service binary without ZMQ.
+	CGO_ENABLED=0 go build -tags="nozmq" -o bin/metadata-service cmd/metadata/main.go
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/controllers/main.go
