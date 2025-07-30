@@ -52,7 +52,14 @@ type ChaosFullTestSuite struct {
 
 // NewChaosFullTestSuite creates a new comprehensive chaos test suite
 func NewChaosFullTestSuite(t *testing.T) *ChaosFullTestSuite {
-	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
+	// Skip if no Kubernetes configuration is available
+	kubeconfig := os.Getenv("KUBECONFIG")
+	if kubeconfig == "" && os.Getenv("KUBERNETES_SERVICE_HOST") == "" {
+		t.Skip("Skipping chaos tests: no Kubernetes configuration available (set KUBECONFIG or run in-cluster)")
+		return nil
+	}
+
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	require.NoError(t, err, "Failed to build kube config")
 
 	k8sClient, err := kubernetes.NewForConfig(config)
