@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -176,6 +175,10 @@ func TestMockZMQPublisher(t *testing.T) {
 	publisher, err := zmq.NewSocket(zmq.PUB)
 	require.NoError(t, err)
 	defer func() { _ = publisher.Close() }()
+
+	// Enable IPv6 for dual-stack support
+	err = publisher.SetIpv6(true)
+	require.NoError(t, err)
 
 	err = publisher.Bind("tcp://127.0.0.1:5557")
 	require.NoError(t, err)
@@ -557,14 +560,24 @@ func createMockPublisher(t testing.TB, pubPort, repPort int) *mockPublisher {
 	pubSock, err := zmq.NewSocket(zmq.PUB)
 	require.NoError(t, err)
 
-	err = pubSock.Bind(fmt.Sprintf("tcp://*:%d", pubPort))
+	// Enable IPv6 for dual-stack support
+	err = pubSock.SetIpv6(true)
+	require.NoError(t, err)
+
+	// Use IPv6 wildcard :: which also listens on IPv4
+	err = pubSock.Bind(formatZMQBindEndpoint("::", pubPort))
 	require.NoError(t, err)
 
 	// Create ROUTER socket for replay
 	repSock, err := zmq.NewSocket(zmq.ROUTER)
 	require.NoError(t, err)
 
-	err = repSock.Bind(fmt.Sprintf("tcp://*:%d", repPort))
+	// Enable IPv6 for dual-stack support
+	err = repSock.SetIpv6(true)
+	require.NoError(t, err)
+
+	// Use IPv6 wildcard :: which also listens on IPv4
+	err = repSock.Bind(formatZMQBindEndpoint("::", repPort))
 	require.NoError(t, err)
 
 	mp := &mockPublisher{

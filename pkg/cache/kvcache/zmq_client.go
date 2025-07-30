@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -71,6 +72,29 @@ func DefaultZMQClientConfig(podKey, podIP, modelName string) *ZMQClientConfig {
 		ReplayTimeout:  DefaultReplayTimeout,
 		ReconnectDelay: DefaultReconnectInterval,
 	}
+}
+
+// ValidateConfig validates the ZMQ client configuration
+func ValidateConfig(config *ZMQClientConfig) error {
+	if config.PodIP == "" {
+		return fmt.Errorf("pod IP is required")
+	}
+
+	// Validate IP address format
+	if ip := net.ParseIP(config.PodIP); ip == nil {
+		return fmt.Errorf("invalid IP address: %s", config.PodIP)
+	}
+
+	// Validate port ranges
+	if config.PubPort <= 0 || config.PubPort > 65535 {
+		return fmt.Errorf("invalid publisher port: %d", config.PubPort)
+	}
+
+	if config.RouterPort <= 0 || config.RouterPort > 65535 {
+		return fmt.Errorf("invalid router port: %d", config.RouterPort)
+	}
+
+	return nil
 }
 
 // ZMQClient manages ZMQ connections to vLLM KV event publishers
@@ -133,7 +157,13 @@ func (c *ZMQClient) Connect() error {
 		return fmt.Errorf("failed to create SUB socket: %w", err)
 	}
 
-	subEndpoint := fmt.Sprintf("tcp://%s:%d", c.config.PodIP, c.config.PubPort)
+	// Enable IPv6 for dual-stack support
+	if err := subSocket.SetIpv6(true); err != nil {
+		_ = subSocket.Close()
+		return fmt.Errorf("failed to enable IPv6 on SUB socket: %w", err)
+	}
+
+	subEndpoint := formatZMQTCPEndpoint(c.config.PodIP, c.config.PubPort)
 	if err := subSocket.Connect(subEndpoint); err != nil {
 		_ = subSocket.Close()
 		return fmt.Errorf("failed to connect to %s: %w", subEndpoint, err)
@@ -152,7 +182,14 @@ func (c *ZMQClient) Connect() error {
 		return fmt.Errorf("failed to create DEALER socket: %w", err)
 	}
 
-	replayEndpoint := fmt.Sprintf("tcp://%s:%d", c.config.PodIP, c.config.RouterPort)
+	// Enable IPv6 for dual-stack support
+	if err := replaySocket.SetIpv6(true); err != nil {
+		_ = subSocket.Close()
+		_ = replaySocket.Close()
+		return fmt.Errorf("failed to enable IPv6 on DEALER socket: %w", err)
+	}
+
+	replayEndpoint := formatZMQTCPEndpoint(c.config.PodIP, c.config.RouterPort)
 	if err := replaySocket.Connect(replayEndpoint); err != nil {
 		_ = subSocket.Close()
 		_ = replaySocket.Close()
