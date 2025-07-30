@@ -399,27 +399,77 @@ func initTraceCache(redisClient *redis.Client, stopCh <-chan struct{}) {
 
 // initKVEventSync initializes the KV event synchronization system
 func (s *Store) initKVEventSync() error {
+	klog.Info("Initializing KV event synchronization")
+
 	// Check if KV sync should be enabled
 	kvSyncValue := utils.LoadEnv("AIBRIX_KV_EVENT_SYNC_ENABLED", "false")
 	kvSyncEnabled, _ := strconv.ParseBool(kvSyncValue)
 	remoteTokenValue := utils.LoadEnv("AIBRIX_USE_REMOTE_TOKENIZER", "false")
 	remoteTokenizerEnabled, _ := strconv.ParseBool(remoteTokenValue)
 
-	// Create sync indexer only if KV sync is properly configured
-	if kvSyncEnabled && remoteTokenizerEnabled {
-		s.syncPrefixIndexer = syncindexer.NewSyncPrefixHashTable()
-
-		// Enable KV event sync
-		s.kvEventManager = NewKVEventManager(s)
-		if err := s.kvEventManager.Start(); err != nil {
-			return fmt.Errorf("failed to start KV event sync: %w", err)
-		}
-		klog.Info("KV event synchronization initialized successfully")
-	} else if kvSyncEnabled && !remoteTokenizerEnabled {
-		klog.Warning("KV sync requires remote tokenizer, feature disabled")
+	// Early return if not enabled
+	if !kvSyncEnabled {
+		klog.Info("KV event sync is disabled")
+		return nil
 	}
 
+	if !remoteTokenizerEnabled {
+		klog.Warning("KV sync requires remote tokenizer, feature disabled")
+		return nil
+	}
+
+	// Track initialization state for cleanup
+	var initialized bool
+	defer func() {
+		if !initialized {
+			s.cleanupKVEventSync()
+		}
+	}()
+
+	// Create and validate event manager first
+	s.kvEventManager = NewKVEventManager(s)
+	if s.kvEventManager == nil {
+		return fmt.Errorf("failed to create KV event manager")
+	}
+
+	// Validate configuration before allocating more resources
+	if err := s.kvEventManager.validateConfiguration(); err != nil {
+		return fmt.Errorf("invalid KV event sync configuration: %w", err)
+	}
+
+	// Create sync indexer after validation passes
+	s.syncPrefixIndexer = syncindexer.NewSyncPrefixHashTable()
+	if s.syncPrefixIndexer == nil {
+		return fmt.Errorf("failed to create sync prefix indexer")
+	}
+
+	// Start event manager
+	if err := s.kvEventManager.Start(); err != nil {
+		return fmt.Errorf("failed to start KV event sync: %w", err)
+	}
+
+	// Mark as successfully initialized
+	initialized = true
+	klog.Info("KV event synchronization initialized successfully")
+
 	return nil
+}
+
+// cleanupKVEventSync cleans up partially initialized KV event sync resources
+func (s *Store) cleanupKVEventSync() {
+	klog.Info("Cleaning up KV event sync resources")
+
+	// Stop event manager if it exists
+	if s.kvEventManager != nil {
+		s.kvEventManager.Stop()
+		s.kvEventManager = nil
+	}
+
+	// Clear sync indexer
+	if s.syncPrefixIndexer != nil {
+		s.syncPrefixIndexer.Close()
+		s.syncPrefixIndexer = nil
+	}
 }
 
 // GetSyncPrefixIndexer returns the sync prefix hash indexer
@@ -431,10 +481,10 @@ func (s *Store) GetSyncPrefixIndexer() *syncindexer.SyncPrefixHashTable {
 
 // Close gracefully shuts down the cache store
 func (s *Store) Close() {
-	if s.syncPrefixIndexer != nil {
-		s.syncPrefixIndexer.Close()
-	}
-	if s.kvEventManager != nil {
-		s.kvEventManager.Stop()
-	}
+	klog.Info("Closing cache store")
+
+	// Clean up KV event sync resources
+	s.cleanupKVEventSync()
+
+	// Other cleanup can be added here in the future
 }

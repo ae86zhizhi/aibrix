@@ -32,6 +32,11 @@ import (
 	"github.com/vllm-project/aibrix/pkg/utils"
 )
 
+const (
+	// kvEventsEnabledValue is the label value that indicates KV events are enabled
+	kvEventsEnabledValue = "true"
+)
+
 // KVEventManager manages KV event subscriptions for vLLM pods
 type KVEventManager struct {
 	// Dependencies
@@ -44,10 +49,11 @@ type KVEventManager struct {
 	enabled bool
 
 	// Lifecycle
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	mu     sync.RWMutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	mu      sync.RWMutex
+	stopped bool // Flag to ensure idempotent Stop()
 }
 
 // NewKVEventManager creates a new KV event manager
@@ -106,6 +112,26 @@ func (m *KVEventManager) Start() error {
 	return nil
 }
 
+// validateConfiguration checks if the manager can start successfully
+// without actually starting any goroutines or connections
+func (m *KVEventManager) validateConfiguration() error {
+	if !m.enabled {
+		return fmt.Errorf("KV event sync is disabled")
+	}
+
+	// Verify remote tokenizer without side effects
+	if !m.verifyRemoteTokenizer() {
+		return fmt.Errorf("remote tokenizer not available")
+	}
+
+	// Additional validation checks could be added here in the future:
+	// - Check ZMQ library is available
+	// - Verify network permissions
+	// - Validate configuration values
+
+	return nil
+}
+
 // verifyRemoteTokenizer checks if remote tokenizer is properly configured
 func (m *KVEventManager) verifyRemoteTokenizer() bool {
 	// Check if the cache/router has remote tokenizer configured
@@ -132,9 +158,19 @@ func (m *KVEventManager) verifyRemoteTokenizer() bool {
 
 // Stop gracefully shuts down the manager
 func (m *KVEventManager) Stop() {
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return // Already stopped
+	}
+	m.stopped = true
+	m.mu.Unlock()
+
 	klog.Info("Stopping KV event manager")
 
-	m.cancel()
+	if m.cancel != nil {
+		m.cancel()
+	}
 
 	// Stop all subscribers
 	m.subscribers.Range(func(key string, client *kvcache.ZMQClient) bool {
@@ -221,7 +257,7 @@ func (m *KVEventManager) OnPodDelete(pod *v1.Pod) {
 // shouldSubscribe checks if a pod should have KV event subscription
 func (m *KVEventManager) shouldSubscribe(pod *v1.Pod) bool {
 	// Check if KV events are enabled
-	if pod.Labels["model.aibrix.ai/kv-events-enabled"] != "true" {
+	if pod.Labels["model.aibrix.ai/kv-events-enabled"] != kvEventsEnabledValue {
 		return false
 	}
 
