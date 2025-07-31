@@ -110,11 +110,15 @@ func TestPrefixCacheRouterConfiguration(t *testing.T) {
 
 			// Set up KV sync router if needed
 			if kvSyncEnabled && useRemoteTokenizer {
+				// Create mock tokenizer pool
+				mockPool := &mockTokenizerPool{
+					tokenizer: tok,
+				}
 				kvSyncRouter := &kvSyncPrefixCacheRouter{
-					cache:           c,
-					remoteTokenizer: tok, // Use same tokenizer for testing
-					syncIndexer:     syncindexer.NewSyncPrefixHashTable(),
-					metricsEnabled:  false,
+					cache:          c,
+					tokenizerPool:  mockPool,
+					syncIndexer:    syncindexer.NewSyncPrefixHashTable(),
+					metricsEnabled: false,
 				}
 				router.kvSyncRouter = kvSyncRouter
 			}
@@ -177,12 +181,17 @@ func TestPrefixCacheRouterWithSyncIndexer(t *testing.T) {
 	tok, err := tokenizer.NewTokenizer("character", nil)
 	require.NoError(t, err)
 
+	// Create mock tokenizer pool
+	mockPool := &mockTokenizerPool{
+		tokenizer: tok,
+	}
+
 	// Create router with sync indexer
 	kvSyncRouter := &kvSyncPrefixCacheRouter{
-		cache:           c,
-		remoteTokenizer: tok, // Use same tokenizer for testing
-		syncIndexer:     syncindexer.NewSyncPrefixHashTable(),
-		metricsEnabled:  false, // Disable metrics for testing
+		cache:          c,
+		tokenizerPool:  mockPool,
+		syncIndexer:    syncindexer.NewSyncPrefixHashTable(),
+		metricsEnabled: false, // Disable metrics for testing
 	}
 
 	router := prefixCacheRouter{
@@ -307,12 +316,17 @@ func TestPrefixCacheRouterFallback(t *testing.T) {
 	tok, err := tokenizer.NewTokenizer("character", nil)
 	require.NoError(t, err)
 
+	// Create mock tokenizer pool
+	mockPool := &mockTokenizerPool{
+		tokenizer: tok,
+	}
+
 	// Test with KV sync but no indexer (should cause error)
 	kvSyncRouterNoIndexer := &kvSyncPrefixCacheRouter{
-		cache:           c,
-		remoteTokenizer: tok,   // Use same tokenizer for testing
-		syncIndexer:     nil,   // No indexer
-		metricsEnabled:  false, // Disable metrics for testing
+		cache:          c,
+		tokenizerPool:  mockPool,
+		syncIndexer:    nil,   // No indexer
+		metricsEnabled: false, // Disable metrics for testing
 	}
 
 	router := prefixCacheRouter{
@@ -369,12 +383,17 @@ func TestPrefixCacheRouterMetrics(t *testing.T) {
 	tok, err := tokenizer.NewTokenizer("character", nil)
 	require.NoError(t, err)
 
+	// Create mock tokenizer pool
+	mockPool := &mockTokenizerPool{
+		tokenizer: tok,
+	}
+
 	// Create router with KV sync enabled to test metrics
 	kvSyncRouter := &kvSyncPrefixCacheRouter{
-		cache:           c,
-		remoteTokenizer: tok, // Use same tokenizer for testing
-		syncIndexer:     syncindexer.NewSyncPrefixHashTable(),
-		metricsEnabled:  true, // Enable metrics for this test
+		cache:          c,
+		tokenizerPool:  mockPool,
+		syncIndexer:    syncindexer.NewSyncPrefixHashTable(),
+		metricsEnabled: true, // Enable metrics for this test
 	}
 
 	router := prefixCacheRouter{
@@ -533,11 +552,16 @@ func TestPrefixCacheRouterLatencyMetric(t *testing.T) {
 	tok, err := tokenizer.NewTokenizer("character", nil)
 	require.NoError(t, err)
 
+	// Create mock tokenizer pool
+	mockPool := &mockTokenizerPool{
+		tokenizer: tok,
+	}
+
 	kvSyncRouter := &kvSyncPrefixCacheRouter{
-		cache:           c,
-		remoteTokenizer: tok, // Use same tokenizer for testing
-		syncIndexer:     syncindexer.NewSyncPrefixHashTable(),
-		metricsEnabled:  true, // Enable metrics for latency test
+		cache:          c,
+		tokenizerPool:  mockPool,
+		syncIndexer:    syncindexer.NewSyncPrefixHashTable(),
+		metricsEnabled: true, // Enable metrics for latency test
 	}
 
 	router := prefixCacheRouter{
@@ -584,6 +608,19 @@ func (m *mockRemoteTokenizer) TokenizeInputText(text string) ([]byte, error) {
 	return []byte(text), nil
 }
 
+// mockTokenizerPool is a mock implementation of TokenizerPool for testing
+type mockTokenizerPool struct {
+	tokenizer tokenizer.Tokenizer
+}
+
+func (m *mockTokenizerPool) GetTokenizer(model string, pods []*v1.Pod) tokenizer.Tokenizer {
+	return m.tokenizer
+}
+
+func (m *mockTokenizerPool) Close() error {
+	return nil
+}
+
 // TestPrefixCacheRouterWithRemoteTokenizer tests remote tokenizer integration
 func TestPrefixCacheRouterWithRemoteTokenizer(t *testing.T) {
 	// Create test pods
@@ -616,18 +653,23 @@ func TestPrefixCacheRouterWithRemoteTokenizer(t *testing.T) {
 	// Create sync indexer
 	syncIdx := syncindexer.NewSyncPrefixHashTable()
 
-	// Create KV sync router with remote tokenizer
+	// Create mock tokenizer pool
+	mockPool := &mockTokenizerPool{
+		tokenizer: mockRemoteTok,
+	}
+
+	// Create KV sync router with mock tokenizer pool
 	kvSyncRouter := &kvSyncPrefixCacheRouter{
-		cache:           c,
-		remoteTokenizer: mockRemoteTok,
-		syncIndexer:     syncIdx,
-		metricsEnabled:  false,
+		cache:          c,
+		tokenizerPool:  mockPool,
+		syncIndexer:    syncIdx,
+		metricsEnabled: false,
 	}
 
 	// Create router with remote tokenizer
 	router := prefixCacheRouter{
 		cache:              c,
-		tokenizer:          mockRemoteTok,
+		tokenizer:          nil, // In tests, we don't create a real pool
 		prefixCacheIndexer: prefixcacheindexer.NewPrefixHashTable(),
 		kvSyncRouter:       kvSyncRouter,
 	}
@@ -665,11 +707,16 @@ func TestPrefixCacheRouterEdgeCases(t *testing.T) {
 				c := cache.NewWithPodsMetricsForTest([]*v1.Pod{}, "test-model", map[string]map[string]metrics.MetricValue{})
 				tok, _ := tokenizer.NewTokenizer("character", nil)
 
+				// Create mock tokenizer pool
+				mockPool := &mockTokenizerPool{
+					tokenizer: tok,
+				}
+
 				kvSyncRouter := &kvSyncPrefixCacheRouter{
-					cache:           c,
-					remoteTokenizer: tok, // Use same tokenizer for testing
-					syncIndexer:     syncindexer.NewSyncPrefixHashTable(),
-					metricsEnabled:  false, // Disable metrics for edge case test
+					cache:          c,
+					tokenizerPool:  mockPool,
+					syncIndexer:    syncindexer.NewSyncPrefixHashTable(),
+					metricsEnabled: false, // Disable metrics for edge case test
 				}
 
 				return prefixCacheRouter{
@@ -703,11 +750,15 @@ func TestPrefixCacheRouterEdgeCases(t *testing.T) {
 					"pod1": {metrics.RealtimeNumRequestsRunning: &metrics.SimpleMetricValue{Value: 0}},
 				})
 				tok, _ := tokenizer.NewTokenizer("character", nil)
+				// Create mock tokenizer pool
+				mockPool := &mockTokenizerPool{
+					tokenizer: tok,
+				}
 				kvSyncRouter := &kvSyncPrefixCacheRouter{
-					cache:           c,
-					remoteTokenizer: tok,   // Use same tokenizer for testing
-					syncIndexer:     nil,   // nil indexer to test error
-					metricsEnabled:  false, // Disable metrics for edge case test
+					cache:          c,
+					tokenizerPool:  mockPool,
+					syncIndexer:    nil,   // nil indexer to test error
+					metricsEnabled: false, // Disable metrics for edge case test
 				}
 
 				return prefixCacheRouter{
@@ -894,11 +945,15 @@ func TestPrefixCacheRouterConcurrency(t *testing.T) {
 			}
 
 			if it.useKVSync {
+				// Create mock tokenizer pool
+				mockPool := &mockTokenizerPool{
+					tokenizer: tok,
+				}
 				kvSyncRouter := &kvSyncPrefixCacheRouter{
-					cache:           c,
-					remoteTokenizer: tok,
-					syncIndexer:     syncindexer.NewSyncPrefixHashTable(),
-					metricsEnabled:  false,
+					cache:          c,
+					tokenizerPool:  mockPool,
+					syncIndexer:    syncindexer.NewSyncPrefixHashTable(),
+					metricsEnabled: false,
 				}
 				router.kvSyncRouter = kvSyncRouter
 			}

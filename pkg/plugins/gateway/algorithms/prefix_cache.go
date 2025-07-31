@@ -42,6 +42,9 @@ const (
 	defaultTokenizerType                      = "character"
 	defaultPodRunningRequestImbalanceAbsCount = 8
 	defaultStandardDeviationFactor            = 1
+
+	// tokenizerTypeTiktoken is the tiktoken tokenizer type
+	tokenizerTypeTiktoken = "tiktoken"
 )
 
 var (
@@ -151,10 +154,10 @@ func init() {
 
 // kvSyncPrefixCacheRouter handles routing when KV sync is enabled
 type kvSyncPrefixCacheRouter struct {
-	cache           cache.Cache
-	remoteTokenizer tokenizer.Tokenizer
-	syncIndexer     *syncindexer.SyncPrefixHashTable
-	metricsEnabled  bool
+	cache          cache.Cache
+	tokenizerPool  TokenizerPoolInterface // Add TokenizerPool reference
+	syncIndexer    *syncindexer.SyncPrefixHashTable
+	metricsEnabled bool
 }
 
 type prefixCacheRouter struct {
@@ -162,8 +165,27 @@ type prefixCacheRouter struct {
 	tokenizer          tokenizer.Tokenizer
 	prefixCacheIndexer *prefixcacheindexer.PrefixHashTable
 
+	// Add TokenizerPool field
+	tokenizerPool TokenizerPoolInterface // nil when not using remote tokenizer
+
 	// KV sync router - only created when needed
 	kvSyncRouter *kvSyncPrefixCacheRouter
+}
+
+// TokenizerPoolInterface defines the interface for tokenizer pools
+type TokenizerPoolInterface interface {
+	GetTokenizer(model string, pods []*v1.Pod) tokenizer.Tokenizer
+	Close() error
+}
+
+// panicTokenizer is a sentinel implementation that panics if used directly.
+// It serves as a safety guard to ensure all tokenization goes through the
+// model-aware helper method when TokenizerPool is enabled.
+type panicTokenizer struct{}
+
+func (p *panicTokenizer) TokenizeInputText(text string) ([]byte, error) {
+	panic("tokenizer.TokenizeInputText was called directly. " +
+		"Use the model-aware getTokenizerForRequest(ctx) helper method instead.")
 }
 
 func NewPrefixCacheRouter() (types.Router, error) {
@@ -173,14 +195,18 @@ func NewPrefixCacheRouter() (types.Router, error) {
 		// Continue without metrics rather than failing
 	}
 
-	// Tokenizer selection logic with dependency awareness
 	var tokenizerObj tokenizer.Tokenizer
-	var remoteTokenizerObj tokenizer.Tokenizer
+	var tokenizerPool *TokenizerPool
+
+	// Note: tokenizerType is a global variable defined at line 48 of prefix_cache.go
+	// tokenizerType = utils.LoadEnv("AIBRIX_PREFIX_CACHE_TOKENIZER_TYPE", "character")
 
 	// Check configuration dependencies
+	// Only KV Event Sync constants are defined in pkg/constants
 	remoteTokenizerValue := utils.LoadEnv("AIBRIX_USE_REMOTE_TOKENIZER", "false")
 	useRemoteTokenizer, _ := strconv.ParseBool(remoteTokenizerValue)
-	kvSyncValue := utils.LoadEnv("AIBRIX_KV_EVENT_SYNC_ENABLED", "false")
+	// Using constant from pkg/constants/kv_event_sync.go
+	kvSyncValue := utils.LoadEnv(constants.EnvKVEventSyncEnabled, "false")
 	kvSyncEnabled, _ := strconv.ParseBool(kvSyncValue)
 
 	// Log configuration state
@@ -188,60 +214,66 @@ func NewPrefixCacheRouter() (types.Router, error) {
 		"remote_tokenizer_requested", useRemoteTokenizer,
 		"kv_sync_requested", kvSyncEnabled)
 
-	// Enforce dependency: KV sync requires remote tokenizer
+	// Preserve existing dependency logic: KV sync requires remote tokenizer
 	if kvSyncEnabled && !useRemoteTokenizer {
 		klog.Warning("KV event sync requires remote tokenizer. " +
 			"Remote tokenizer will be automatically enabled.")
 		useRemoteTokenizer = true
 	}
 
-	// Configure remote tokenizer if needed
-	if useRemoteTokenizer {
-		// Create remote tokenizer for vLLM consistency
-		remoteConfig := tokenizer.RemoteTokenizerConfig{
-			Engine:     utils.LoadEnv("AIBRIX_REMOTE_TOKENIZER_ENGINE", "vllm"),
-			Endpoint:   utils.LoadEnv("AIBRIX_REMOTE_TOKENIZER_ENDPOINT", ""),
-			Model:      utils.LoadEnv("AIBRIX_REMOTE_TOKENIZER_MODEL", ""),
-			Timeout:    30 * time.Second,
-			MaxRetries: 3,
-		}
-
-		if remoteConfig.Endpoint != "" {
-			remote, err := tokenizer.NewRemoteTokenizer(remoteConfig)
-			if err != nil {
-				if kvSyncEnabled {
-					// Remote tokenizer is required for KV sync
-					return nil, fmt.Errorf("failed to create remote tokenizer (required for KV sync): %w", err)
-				}
-				klog.Warningf("Failed to create remote tokenizer: %v, falling back to local", err)
-			} else {
-				remoteTokenizerObj = remote
-				tokenizerObj = remote // Use remote as primary
-				klog.Info("Remote tokenizer initialized successfully")
-			}
-		} else if kvSyncEnabled {
-			return nil, fmt.Errorf("AIBRIX_REMOTE_TOKENIZER_ENDPOINT not configured (required for KV sync)")
-		}
-	}
-
-	// Fallback to local tokenizer if remote not available
-	if tokenizerObj == nil {
-		if tokenizerType == "tiktoken" {
-			tokenizerObj = tokenizer.NewTiktokenTokenizer()
-		} else {
-			tokenizerObj = tokenizer.NewCharacterTokenizer()
-		}
-	}
-
+	// Get cache instance (this is existing code)
 	c, err := cache.Get()
 	if err != nil {
 		klog.Error("fail to get cache store in prefix cache router")
 		return nil, err
 	}
 
+	// Configure TokenizerPool if remote tokenizer is needed
+	if useRemoteTokenizer {
+		// Load pool configuration from environment
+		// Only KV Event Sync constants are defined in pkg/constants
+		poolConfig := TokenizerPoolConfig{
+			EnableVLLMRemote:     true, // We're using it, so enable it
+			EndpointTemplate:     utils.LoadEnv("AIBRIX_VLLM_TOKENIZER_ENDPOINT_TEMPLATE", "http://%s:8000"),
+			HealthCheckPeriod:    time.Duration(utils.LoadEnvInt("AIBRIX_TOKENIZER_HEALTH_CHECK_PERIOD", 30)) * time.Second,
+			TokenizerTTL:         time.Duration(utils.LoadEnvInt("AIBRIX_TOKENIZER_TTL", 300)) * time.Second,
+			MaxTokenizersPerPool: utils.LoadEnvInt("AIBRIX_MAX_TOKENIZERS_PER_POOL", 100),
+			FallbackTokenizer:    nil, // Will be set below
+			Timeout:              time.Duration(utils.LoadEnvInt("AIBRIX_TOKENIZER_REQUEST_TIMEOUT", 5)) * time.Second,
+			ModelServiceMap:      make(map[string]string),
+		}
+
+		// Create fallback tokenizer based on configured type
+		var fallbackTokenizer tokenizer.Tokenizer
+		if tokenizerType == tokenizerTypeTiktoken {
+			fallbackTokenizer = tokenizer.NewTiktokenTokenizer()
+		} else {
+			fallbackTokenizer = tokenizer.NewCharacterTokenizer()
+		}
+		poolConfig.FallbackTokenizer = fallbackTokenizer
+
+		// Create the pool
+		pool := NewTokenizerPool(poolConfig, c)
+		tokenizerPool = pool
+
+		// Use panic tokenizer to catch any direct usage
+		// All tokenization should go through pool in route methods
+		tokenizerObj = &panicTokenizer{}
+
+		klog.Info("TokenizerPool initialized with remote tokenizer support")
+	} else {
+		// Fallback to local tokenizer (existing behavior when disabled)
+		if tokenizerType == tokenizerTypeTiktoken {
+			tokenizerObj = tokenizer.NewTiktokenTokenizer()
+		} else {
+			tokenizerObj = tokenizer.NewCharacterTokenizer()
+		}
+	}
+
+	// Log final configuration
 	klog.InfoS("prefix_cache_configurations",
 		"tokenizer_type", tokenizerType,
-		"remote_tokenizer_enabled", remoteTokenizerObj != nil,
+		"remote_tokenizer_enabled", tokenizerPool != nil,
 		"kv_sync_enabled", kvSyncEnabled,
 		"pod_running_request_imbalance_abs_count", podRunningRequestImbalanceAbsCount,
 		"matched_pods_running_requests_standard_deviation_factor", standardDeviationFactor)
@@ -251,15 +283,16 @@ func NewPrefixCacheRouter() (types.Router, error) {
 		cache:              c,
 		tokenizer:          tokenizerObj,
 		prefixCacheIndexer: prefixcacheindexer.NewPrefixHashTable(),
+		tokenizerPool:      tokenizerPool, // May be nil when feature disabled
 	}
 
 	// Only create KV sync router if enabled
 	if kvSyncEnabled && useRemoteTokenizer {
 		kvSyncRouter := &kvSyncPrefixCacheRouter{
-			cache:           c,
-			remoteTokenizer: remoteTokenizerObj,
-			syncIndexer:     syncindexer.NewSyncPrefixHashTable(),
-			metricsEnabled:  true,
+			cache:          c,
+			tokenizerPool:  tokenizerPool, // Pass the pool reference
+			syncIndexer:    syncindexer.NewSyncPrefixHashTable(),
+			metricsEnabled: true,
 		}
 
 		router.kvSyncRouter = kvSyncRouter
@@ -271,13 +304,42 @@ func NewPrefixCacheRouter() (types.Router, error) {
 		}
 	} else {
 		// Set local indexer metrics only if metrics are enabled
-		if metrics := getPrefixCacheMetrics(); metrics != nil {
-			metrics.prefixCacheIndexerStatus.WithLabelValues("", "local").Set(1)
-			metrics.prefixCacheIndexerStatus.WithLabelValues("", "sync").Set(0)
+		// Using constant from pkg/constants/kv_event_sync.go
+		// Note: AIBRIX_PREFIX_CACHE_METRICS_ENABLED was added in this branch for KV Event Sync
+		metricsEnabled := utils.LoadEnv(constants.EnvPrefixCacheMetricsEnabled, "false") == "true"
+		if metricsEnabled {
+			if metrics := getPrefixCacheMetrics(); metrics != nil {
+				metrics.prefixCacheIndexerStatus.WithLabelValues("", "local").Set(1)
+				metrics.prefixCacheIndexerStatus.WithLabelValues("", "sync").Set(0)
+			}
 		}
 	}
 
 	return router, nil
+}
+
+// getTokenizerForRequest returns the appropriate tokenizer for the current request.
+// This method encapsulates the conditional logic for choosing between the pool
+// and the local tokenizer, ensuring model-aware tokenization when available.
+func (p *prefixCacheRouter) getTokenizerForRequest(ctx *types.RoutingContext, readyPodList types.PodList) tokenizer.Tokenizer {
+	// If pool exists, use model-specific tokenizer
+	if p.tokenizerPool != nil {
+		return p.tokenizerPool.GetTokenizer(ctx.Model, readyPodList.All())
+	}
+
+	// When pool is nil, return p.tokenizer
+	// This is safe because:
+	// 1. If useRemoteTokenizer=true, p.tokenizer is panicTokenizer, but p.tokenizerPool!=nil, so we won't reach here
+	// 2. If useRemoteTokenizer=false, p.tokenizer is local tokenizer, which is what we want
+	return p.tokenizer
+}
+
+func (k *kvSyncPrefixCacheRouter) getTokenizerForRequest(ctx *types.RoutingContext, readyPodList types.PodList) tokenizer.Tokenizer {
+	if k.tokenizerPool != nil {
+		return k.tokenizerPool.GetTokenizer(ctx.Model, readyPodList.All())
+	}
+	// This shouldn't happen as kvSyncRouter requires TokenizerPool
+	return nil
 }
 
 func (p prefixCacheRouter) Route(ctx *types.RoutingContext, readyPodList types.PodList) (string, error) {
@@ -294,7 +356,9 @@ func (p prefixCacheRouter) routeOriginal(ctx *types.RoutingContext, readyPodList
 	var matchedPods map[string]int
 	var targetPod *v1.Pod
 
-	tokens, err := p.tokenizer.TokenizeInputText(ctx.Message)
+	// Use helper method to get the appropriate tokenizer
+	tokenizerToUse := p.getTokenizerForRequest(ctx, readyPodList)
+	tokens, err := tokenizerToUse.TokenizeInputText(ctx.Message)
 	if err != nil {
 		return "", err
 	}
@@ -355,6 +419,18 @@ func (p prefixCacheRouter) routeOriginal(ctx *types.RoutingContext, readyPodList
 	return ctx.TargetAddress(), nil
 }
 
+// Cleanup gracefully shuts down the TokenizerPool if it exists
+func (p *prefixCacheRouter) Cleanup() error {
+	if p.tokenizerPool != nil {
+		klog.Info("Shutting down TokenizerPool...")
+		if err := p.tokenizerPool.Close(); err != nil {
+			klog.Errorf("Error closing TokenizerPool: %v", err)
+			return err
+		}
+	}
+	return nil
+}
+
 // Route handles KV sync routing with clean implementation
 func (k *kvSyncPrefixCacheRouter) Route(ctx *types.RoutingContext, readyPodList types.PodList) (string, error) {
 	// Start timing for latency metric if metrics are enabled
@@ -381,8 +457,14 @@ func (k *kvSyncPrefixCacheRouter) Route(ctx *types.RoutingContext, readyPodList 
 
 	loraID := int64(-1) // TODO: Extract from context when available
 
-	// Tokenize input using remote tokenizer
-	tokens, err := k.remoteTokenizer.TokenizeInputText(ctx.Message)
+	// Use helper method to get model-specific tokenizer
+	tokenizerToUse := k.getTokenizerForRequest(ctx, readyPodList)
+	if tokenizerToUse == nil {
+		return "", fmt.Errorf("TokenizerPool not initialized for KV sync router")
+	}
+
+	// Tokenize the input
+	tokens, err := tokenizerToUse.TokenizeInputText(ctx.Message)
 	if err != nil {
 		return "", err
 	}
