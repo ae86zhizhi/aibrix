@@ -29,9 +29,9 @@ The KV event synchronization testing framework provides multiple layers of testi
 **Frequency**: Every commit  
 
 Key test files:
-- `pkg/cache/kvcache/zmq_client_test.go` - ZMQ client functionality
-- `pkg/utils/syncprefixcacheindexer/sync_hash_test.go` - Sync indexer operations
-- `pkg/cache/kv_event_manager_test.go` - Event manager logic
+- `pkg/cache/kvcache/*_test.go` - ZMQ client functionality
+- `pkg/utils/syncprefixcacheindexer/*_test.go` - Sync indexer operations
+- `pkg/cache/*_test.go` - Event manager logic
 
 ### 2. Integration Tests
 **Purpose**: Test component interactions  
@@ -49,7 +49,8 @@ Key test files:
 **Frequency**: Every PR and nightly  
 
 Key test files:
-- `test/e2e/kv_sync_e2e_test.go` - Complete E2E scenarios
+- `test/e2e/kv_sync_e2e_simple_test.go` - Simple E2E test scenarios
+- `test/e2e/kv_sync_e2e_test.go` - Complete E2E scenarios (when available)
 - `test/e2e/kv_sync_helpers.go` - E2E test utilities
 
 ### 4. Performance Benchmarks
@@ -59,8 +60,8 @@ Key test files:
 **Frequency**: Nightly  
 
 Key test files:
-- `test/benchmark/kv_sync_bench_test.go` - Performance benchmarks
-- `test/benchmark/baseline_metrics.json` - Performance baselines
+- `test/benchmark/kv_sync_indexer_bench_test.go` - Sync indexer performance benchmarks
+- Performance baselines tracked in CI/CD
 
 ### 5. Chaos Tests
 **Purpose**: Validate system resilience  
@@ -69,8 +70,8 @@ Key test files:
 **Frequency**: Weekly  
 
 Key test files:
-- `test/chaos/chaos_test.go` - Chaos test scenarios
-- `test/chaos/experiments/*.yaml` - Chaos Mesh experiments
+- `test/chaos/chaos_simple_test.go` - Chaos test scenarios
+- Chaos experiments configured in test code
 
 ## Quick Start
 
@@ -79,26 +80,28 @@ Key test files:
 ```bash
 # Prerequisites
 sudo apt-get install -y libzmq3-dev pkg-config
-go install -tags zmq github.com/vllm-project/aibrix/...
 
-# Run all unit tests
+# Run all unit tests with ZMQ support
 make test-zmq
 make test-kv-sync
 
 # Run integration tests
-go test -v -tags="zmq" ./test/integration/
+go test -v -tags="zmq" ./test/integration/kv_event_sync_test.go
 
 # Run E2E tests (requires Kind cluster)
-kind create cluster --config development/vllm/kind-config.yaml
+kind create cluster --name aibrix-e2e
 make docker-build-all
-go test -v ./test/e2e/kv_sync_e2e_test.go
+make test-kv-sync-e2e
 
 # Run benchmarks
-cd test/benchmark && go test -bench=. -benchmem
+make test-kv-sync-benchmark
 
 # Run chaos tests (requires Chaos Mesh)
 curl -sSL https://mirrors.chaos-mesh.org/latest/install.sh | bash
-go test -v ./test/chaos/
+make test-kv-sync-chaos
+
+# Run all KV sync tests
+make test-kv-sync-all
 ```
 
 ## CI/CD Integration
@@ -211,9 +214,9 @@ All test runs produce artifacts stored in GitHub Actions:
 ## Resources
 
 ### Internal Documentation
-- [KV Cache Events Guide](../kv-cache-events-guide.md)
-- [Architecture Overview](../designs/architecture.rst)
-- [Task Implementation Guides](../../kv_pub_sub_tasks/)
+- [KV Event Sync Feature Guide](../source/features/kv-event-sync.rst)
+- [KV Event Sync E2E Testing Guide](../source/testing/kv-event-sync-e2e.rst)
+- [Architecture Overview](../source/designs/architecture.rst)
 
 ### External Resources
 - [Ginkgo Testing Framework](https://onsi.github.io/ginkgo/)

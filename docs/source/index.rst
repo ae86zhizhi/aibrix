@@ -71,23 +71,6 @@ Documentation
 
    production/observability.rst
 
-.. toctree::
-   :maxdepth: 1
-   :caption: Deployment Guides
-
-   deployment/kv-event-sync-setup.rst
-
-.. toctree::
-   :maxdepth: 1
-   :caption: API Reference
-
-   api/kv-event-sync.rst
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Migration Guides
-
-   migration/enable-kv-events.rst
 
 .. toctree::
    :maxdepth: 1
