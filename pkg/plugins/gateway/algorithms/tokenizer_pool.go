@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/vllm-project/aibrix/pkg/cache"
 	"github.com/vllm-project/aibrix/pkg/utils/tokenizer"
 	v1 "k8s.io/api/core/v1"
@@ -33,12 +32,6 @@ import (
 const (
 	// vllmEngine is the constant for vLLM inference engine
 	vllmEngine = "vllm"
-)
-
-var (
-	// Global metrics instance to avoid duplicate registration
-	tokenizerPoolMetrics     *TokenizerPoolMetrics
-	tokenizerPoolMetricsOnce sync.Once
 )
 
 // TokenizerPoolConfig represents configuration for the TokenizerPool
@@ -64,12 +57,13 @@ type tokenizerEntry struct {
 
 // TokenizerPool manages model-specific tokenizers with caching and health checking
 type TokenizerPool struct {
-	mu         sync.RWMutex
-	tokenizers map[string]*tokenizerEntry // model -> tokenizer mapping
-	config     TokenizerPoolConfig
-	cache      cache.Cache // for pod discovery
-	metrics    *TokenizerPoolMetrics
-	stopCh     chan struct{}
+	mu                sync.RWMutex
+	tokenizers        map[string]*tokenizerEntry // model -> tokenizer mapping
+	config            TokenizerPoolConfig
+	cache             cache.Cache           // for pod discovery
+	metrics           *TokenizerPoolMetrics // Can be nil when feature disabled
+	metricsRegistered bool
+	stopCh            chan struct{}
 }
 
 // TokenizerPoolMetrics contains Prometheus metrics for the pool
@@ -82,67 +76,156 @@ type TokenizerPoolMetrics struct {
 	tokenizerLatency           *prometheus.HistogramVec
 }
 
-// initMetrics initializes the global metrics instance once
-func initMetrics() {
-	tokenizerPoolMetricsOnce.Do(func() {
-		tokenizerPoolMetrics = &TokenizerPoolMetrics{
-			activeTokenizers: promauto.NewGauge(prometheus.GaugeOpts{
-				Name: "aibrix_tokenizer_pool_active_tokenizers",
-				Help: "Number of active tokenizers in the pool",
-			}),
-			tokenizerCreationSuccesses: promauto.NewCounter(prometheus.CounterOpts{
-				Name: "aibrix_tokenizer_pool_creation_successes_total",
-				Help: "Total number of successful tokenizer creations",
-			}),
-			tokenizerCreationFailures: promauto.NewCounter(prometheus.CounterOpts{
-				Name: "aibrix_tokenizer_pool_creation_failures_total",
-				Help: "Total number of failed tokenizer creations",
-			}),
-			unhealthyTokenizers: promauto.NewCounter(prometheus.CounterOpts{
-				Name: "aibrix_tokenizer_pool_unhealthy_tokenizers_total",
-				Help: "Total number of times tokenizers were marked unhealthy",
-			}),
-			tokenizerRequests: promauto.NewCounterVec(prometheus.CounterOpts{
-				Name: "aibrix_tokenizer_pool_requests_total",
-				Help: "Total number of tokenizer requests by model",
-			}, []string{"model"}),
-			tokenizerLatency: promauto.NewHistogramVec(prometheus.HistogramOpts{
-				Name:    "aibrix_tokenizer_pool_latency_seconds",
-				Help:    "Tokenizer request latency in seconds",
-				Buckets: prometheus.DefBuckets,
-			}, []string{"model"}),
+// createTokenizerPoolMetrics creates metrics only when needed
+func createTokenizerPoolMetrics() *TokenizerPoolMetrics {
+	return &TokenizerPoolMetrics{
+		activeTokenizers: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "aibrix_tokenizer_pool_active_tokenizers",
+			Help: "Number of active tokenizers in the pool",
+		}),
+		tokenizerCreationSuccesses: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "aibrix_tokenizer_pool_creation_successes_total",
+			Help: "Total number of successful tokenizer creations",
+		}),
+		tokenizerCreationFailures: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "aibrix_tokenizer_pool_creation_failures_total",
+			Help: "Total number of failed tokenizer creations",
+		}),
+		unhealthyTokenizers: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "aibrix_tokenizer_pool_unhealthy_tokenizers_total",
+			Help: "Total number of times tokenizers were marked unhealthy",
+		}),
+		tokenizerRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "aibrix_tokenizer_pool_requests_total",
+			Help: "Total number of tokenizer requests by model",
+		}, []string{"model"}),
+		tokenizerLatency: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "aibrix_tokenizer_pool_latency_seconds",
+			Help:    "Tokenizer request latency in seconds",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"model"}),
+	}
+}
+
+// register registers metrics with Prometheus
+func (m *TokenizerPoolMetrics) register() error {
+	collectors := []prometheus.Collector{
+		m.activeTokenizers,
+		m.tokenizerCreationSuccesses,
+		m.tokenizerCreationFailures,
+		m.unhealthyTokenizers,
+		m.tokenizerRequests,
+		m.tokenizerLatency,
+	}
+
+	for _, collector := range collectors {
+		if err := prometheus.Register(collector); err != nil {
+			// If already registered, it's ok (might happen in tests)
+			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+				return fmt.Errorf("failed to register metric: %w", err)
+			}
 		}
-	})
+	}
+
+	return nil
+}
+
+// unregister removes metrics from Prometheus registry
+func (m *TokenizerPoolMetrics) unregister() {
+	// Best effort unregistration
+	prometheus.Unregister(m.activeTokenizers)
+	prometheus.Unregister(m.tokenizerCreationSuccesses)
+	prometheus.Unregister(m.tokenizerCreationFailures)
+	prometheus.Unregister(m.unhealthyTokenizers)
+	prometheus.Unregister(m.tokenizerRequests)
+	prometheus.Unregister(m.tokenizerLatency)
 }
 
 // NewTokenizerPool creates a new TokenizerPool instance
 func NewTokenizerPool(config TokenizerPoolConfig, cache cache.Cache) *TokenizerPool {
-	// Initialize metrics once
-	initMetrics()
-
 	pool := &TokenizerPool{
 		tokenizers: make(map[string]*tokenizerEntry),
 		config:     config,
 		cache:      cache,
-		metrics:    tokenizerPoolMetrics,
 		stopCh:     make(chan struct{}),
 	}
 
-	// Start health checker if enabled
-	if config.EnableVLLMRemote && config.HealthCheckPeriod > 0 {
-		pool.startHealthChecker()
+	// Only create and register metrics if feature is enabled
+	if config.EnableVLLMRemote {
+		metrics := createTokenizerPoolMetrics()
+		if err := metrics.register(); err != nil {
+			klog.Errorf("Failed to register tokenizer pool metrics: %v", err)
+			// Continue without metrics rather than failing
+		} else {
+			pool.metrics = metrics
+			pool.metricsRegistered = true
+		}
+
+		// Start health checker only if enabled
+		if config.HealthCheckPeriod > 0 {
+			pool.startHealthChecker()
+		}
 	}
 
 	return pool
 }
 
+// Helper methods for safe metric operations
+func (p *TokenizerPool) incActiveTokenizers() {
+	if p.metrics != nil {
+		p.metrics.activeTokenizers.Inc()
+	}
+}
+
+func (p *TokenizerPool) decActiveTokenizers() {
+	if p.metrics != nil {
+		p.metrics.activeTokenizers.Dec()
+	}
+}
+
+func (p *TokenizerPool) setActiveTokenizers(count float64) {
+	if p.metrics != nil {
+		p.metrics.activeTokenizers.Set(count)
+	}
+}
+
+func (p *TokenizerPool) incTokenizerCreationSuccesses() {
+	if p.metrics != nil {
+		p.metrics.tokenizerCreationSuccesses.Inc()
+	}
+}
+
+func (p *TokenizerPool) incTokenizerCreationFailures() {
+	if p.metrics != nil {
+		p.metrics.tokenizerCreationFailures.Inc()
+	}
+}
+
+func (p *TokenizerPool) incUnhealthyTokenizers() {
+	if p.metrics != nil {
+		p.metrics.unhealthyTokenizers.Inc()
+	}
+}
+
+func (p *TokenizerPool) incTokenizerRequests(model string) {
+	if p.metrics != nil {
+		p.metrics.tokenizerRequests.WithLabelValues(model).Inc()
+	}
+}
+
+func (p *TokenizerPool) observeTokenizerLatency(model string, duration time.Duration) {
+	if p.metrics != nil {
+		p.metrics.tokenizerLatency.WithLabelValues(model).Observe(duration.Seconds())
+	}
+}
+
 // GetTokenizer returns a tokenizer for the specified model
 func (p *TokenizerPool) GetTokenizer(model string, pods []*v1.Pod) tokenizer.Tokenizer {
-	// Metrics
-	p.metrics.tokenizerRequests.WithLabelValues(model).Inc()
+	// Safe metric increment
+	p.incTokenizerRequests(model)
 	startTime := time.Now()
 	defer func() {
-		p.metrics.tokenizerLatency.WithLabelValues(model).Observe(time.Since(startTime).Seconds())
+		p.observeTokenizerLatency(model, time.Since(startTime))
 	}()
 
 	// If remote tokenizer is disabled, return fallback immediately
@@ -192,7 +275,7 @@ func (p *TokenizerPool) createOrUpdateTokenizer(model string, pods []*v1.Pod) to
 	if endpoint == "" {
 		p.mu.Unlock()
 		klog.V(4).Infof("No vLLM endpoint found for model %s, using fallback tokenizer", model)
-		p.metrics.tokenizerCreationFailures.Inc()
+		p.incTokenizerCreationFailures()
 		return p.config.FallbackTokenizer
 	}
 
@@ -213,7 +296,7 @@ func (p *TokenizerPool) createOrUpdateTokenizer(model string, pods []*v1.Pod) to
 	tok, err := tokenizer.NewRemoteTokenizer(config)
 	if err != nil {
 		klog.Warningf("Failed to create vLLM tokenizer for model %s: %v", model, err)
-		p.metrics.tokenizerCreationFailures.Inc()
+		p.incTokenizerCreationFailures()
 		return p.config.FallbackTokenizer
 	}
 
@@ -224,7 +307,7 @@ func (p *TokenizerPool) createOrUpdateTokenizer(model string, pods []*v1.Pod) to
 	if remoteTok, ok := tok.(interface{ IsHealthy(context.Context) bool }); ok {
 		if !remoteTok.IsHealthy(ctx) {
 			klog.Warningf("Created tokenizer for model %s is not healthy", model)
-			p.metrics.tokenizerCreationFailures.Inc()
+			p.incTokenizerCreationFailures()
 			return p.config.FallbackTokenizer
 		}
 	}
@@ -254,8 +337,8 @@ func (p *TokenizerPool) createOrUpdateTokenizer(model string, pods []*v1.Pod) to
 		healthStatus: true,
 	}
 
-	p.metrics.activeTokenizers.Set(float64(len(p.tokenizers)))
-	p.metrics.tokenizerCreationSuccesses.Inc()
+	p.setActiveTokenizers(float64(len(p.tokenizers)))
+	p.incTokenizerCreationSuccesses()
 	klog.V(3).Infof("Created vLLM tokenizer for model %s at endpoint %s", model, endpoint)
 
 	return tok
@@ -401,7 +484,7 @@ func (p *TokenizerPool) performHealthCheck() {
 			} else if oldStatus {
 				// Only log and count when transitioning from healthy to unhealthy
 				klog.Warningf("Tokenizer for model %s is now unhealthy", model)
-				p.metrics.unhealthyTokenizers.Inc()
+				p.incUnhealthyTokenizers()
 			}
 		}
 	}
@@ -428,7 +511,7 @@ func (p *TokenizerPool) cleanupStaleTokenizers() {
 			klog.V(4).Infof("Removed stale tokenizer for model %s", model)
 		}
 	}
-	p.metrics.activeTokenizers.Set(float64(len(p.tokenizers)))
+	p.setActiveTokenizers(float64(len(p.tokenizers)))
 	p.mu.Unlock()
 
 	// Close tokenizers outside of lock
@@ -460,7 +543,7 @@ func (p *TokenizerPool) Close() error {
 		}{model: model, tok: entry.tokenizer})
 	}
 	p.tokenizers = make(map[string]*tokenizerEntry)
-	p.metrics.activeTokenizers.Set(0)
+	p.setActiveTokenizers(0)
 	p.mu.Unlock()
 
 	// Close tokenizers outside of lock
@@ -470,6 +553,11 @@ func (p *TokenizerPool) Close() error {
 				klog.Errorf("Error closing tokenizer for model %s: %v", item.model, err)
 			}
 		}
+	}
+
+	// Unregister metrics if they were registered
+	if p.metricsRegistered && p.metrics != nil {
+		p.metrics.unregister()
 	}
 
 	return nil
