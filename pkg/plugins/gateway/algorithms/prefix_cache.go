@@ -27,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/vllm-project/aibrix/pkg/cache"
+	"github.com/vllm-project/aibrix/pkg/constants"
 	"github.com/vllm-project/aibrix/pkg/metrics"
 	"github.com/vllm-project/aibrix/pkg/types"
 	"github.com/vllm-project/aibrix/pkg/utils"
@@ -196,7 +197,7 @@ func NewPrefixCacheRouter() (types.Router, error) {
 		prefixCacheIndexerStatus.WithLabelValues("", "local").Set(0)
 	} else {
 		// Set local indexer metrics only if metrics are enabled
-		metricsEnabled := utils.LoadEnv("AIBRIX_PREFIX_CACHE_METRICS_ENABLED", "false") == "true"
+		metricsEnabled := utils.LoadEnv(constants.EnvPrefixCacheMetricsEnabled, "false") == "true"
 		if metricsEnabled {
 			prefixCacheIndexerStatus.WithLabelValues("", "local").Set(1)
 			prefixCacheIndexerStatus.WithLabelValues("", "sync").Set(0)

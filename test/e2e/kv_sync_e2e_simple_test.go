@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/vllm-project/aibrix/pkg/constants"
 )
 
 // TestKVSyncE2EDeployment tests deployment of vLLM pods with KV events enabled
@@ -65,7 +66,7 @@ func TestKVSyncE2EDeployment(t *testing.T) {
 
 		// Validate all pods have KV events enabled
 		for _, pod := range pods {
-			assert.Equal(t, "true", pod.Labels["model.aibrix.ai/kv-events-enabled"])
+			assert.Equal(t, "true", pod.Labels[constants.KVEventsEnabledLabel])
 			helper.ValidateKVEventConnection(t, pod.Status.PodIP)
 		}
 	})

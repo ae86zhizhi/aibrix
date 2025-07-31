@@ -33,12 +33,13 @@ import (
 
 	"github.com/vllm-project/aibrix/pkg/cache"
 	"github.com/vllm-project/aibrix/pkg/cache/kvcache"
+	"github.com/vllm-project/aibrix/pkg/constants"
 	syncindexer "github.com/vllm-project/aibrix/pkg/utils/syncprefixcacheindexer"
 )
 
 // setupTestEnvironment sets up the test environment with proper configuration
 func setupTestEnvironment(t *testing.T) {
-	t.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", "true")
+	t.Setenv(constants.EnvKVEventSyncEnabled, "true")
 	t.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", "true")
 	t.Setenv("AIBRIX_PREFIX_CACHE_TOKENIZER_TYPE", "remote")
 	t.Setenv("AIBRIX_REMOTE_TOKENIZER_ENDPOINT", "http://test:8000")
@@ -68,8 +69,8 @@ func TestPodLifecycleIntegration(t *testing.T) {
 			Namespace: "default",
 			Labels: map[string]string{
 				"model.aibrix.ai/name":              "test-model",
-				"model.aibrix.ai/kv-events-enabled": "true",
-				"model.aibrix.ai/lora-id":           "123",
+				constants.KVEventsEnabledLabel: "true",
+				constants.LoraIDLabel: "123",
 			},
 		},
 		Status: v1.PodStatus{
@@ -148,7 +149,7 @@ func TestConfigurationDependencyValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set environment variables
 			t.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", tt.remoteTokenizer)
-			t.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", tt.kvSyncRequested)
+			t.Setenv(constants.EnvKVEventSyncEnabled, tt.kvSyncRequested)
 			t.Setenv("AIBRIX_PREFIX_CACHE_TOKENIZER_TYPE", tt.prefixCacheType)
 			t.Setenv("AIBRIX_REMOTE_TOKENIZER_ENDPOINT", "http://test:8000")
 
@@ -256,7 +257,7 @@ func TestConcurrentEventProcessing(t *testing.T) {
 				Namespace: "default",
 				Labels: map[string]string{
 					"model.aibrix.ai/name":              "test-model",
-					"model.aibrix.ai/kv-events-enabled": "true",
+					constants.KVEventsEnabledLabel: "true",
 				},
 			},
 			Status: v1.PodStatus{

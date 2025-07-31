@@ -28,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vllm-project/aibrix/pkg/cache/kvcache"
+	"github.com/vllm-project/aibrix/pkg/constants"
 	syncindexer "github.com/vllm-project/aibrix/pkg/utils/syncprefixcacheindexer"
 )
 
@@ -68,7 +69,7 @@ func TestKVEventManagerCreation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set environment variables
-			t.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", tt.kvSyncEnabled)
+			t.Setenv(constants.EnvKVEventSyncEnabled, tt.kvSyncEnabled)
 			t.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", tt.remoteTokenizer)
 
 			store := &Store{}
@@ -95,8 +96,8 @@ func TestShouldSubscribe(t *testing.T) {
 			pod: &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"model.aibrix.ai/name":              "test-model",
-						"model.aibrix.ai/kv-events-enabled": "true",
+						"model.aibrix.ai/name":         "test-model",
+						constants.KVEventsEnabledLabel: "true",
 					},
 				},
 				Status: v1.PodStatus{
@@ -126,8 +127,8 @@ func TestShouldSubscribe(t *testing.T) {
 			pod: &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"model.aibrix.ai/name":              "test-model",
-						"model.aibrix.ai/kv-events-enabled": "true",
+						"model.aibrix.ai/name":         "test-model",
+						constants.KVEventsEnabledLabel: "true",
 					},
 				},
 				Status: v1.PodStatus{
@@ -141,8 +142,8 @@ func TestShouldSubscribe(t *testing.T) {
 			pod: &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"model.aibrix.ai/name":              "test-model",
-						"model.aibrix.ai/kv-events-enabled": "true",
+						"model.aibrix.ai/name":         "test-model",
+						constants.KVEventsEnabledLabel: "true",
 					},
 				},
 				Status: v1.PodStatus{
@@ -156,7 +157,7 @@ func TestShouldSubscribe(t *testing.T) {
 			pod: &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"model.aibrix.ai/kv-events-enabled": "true",
+						constants.KVEventsEnabledLabel: "true",
 					},
 				},
 				Status: v1.PodStatus{
@@ -179,7 +180,7 @@ func TestShouldSubscribe(t *testing.T) {
 // TestPodLifecycle tests pod add/update/delete lifecycle
 func TestPodLifecycle(t *testing.T) {
 	// Setup environment
-	t.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", "true")
+	t.Setenv(constants.EnvKVEventSyncEnabled, "true")
 	t.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", "true")
 	t.Setenv("AIBRIX_PREFIX_CACHE_TOKENIZER_TYPE", "remote")
 	t.Setenv("AIBRIX_REMOTE_TOKENIZER_ENDPOINT", "http://test:8000")
@@ -198,8 +199,8 @@ func TestPodLifecycle(t *testing.T) {
 			Name:      "test-pod",
 			Namespace: "default",
 			Labels: map[string]string{
-				"model.aibrix.ai/name":              "test-model",
-				"model.aibrix.ai/kv-events-enabled": "true",
+				"model.aibrix.ai/name":         "test-model",
+				constants.KVEventsEnabledLabel: "true",
 			},
 		},
 		Status: v1.PodStatus{
@@ -279,7 +280,7 @@ func TestKVEventHandler(t *testing.T) {
 		Pod: &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					"model.aibrix.ai/lora-id": "123",
+					constants.LoraIDLabel: "123",
 				},
 			},
 		},
@@ -346,7 +347,7 @@ func TestGetLoraID(t *testing.T) {
 				Pod: &v1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							"model.aibrix.ai/lora-id": "456",
+							constants.LoraIDLabel: "456",
 						},
 					},
 				},
@@ -359,7 +360,7 @@ func TestGetLoraID(t *testing.T) {
 				Pod: &v1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							"model.aibrix.ai/lora-id": "invalid",
+							constants.LoraIDLabel: "invalid",
 						},
 					},
 				},
@@ -478,7 +479,7 @@ func TestConfigurationDependencies(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set environment variables
 			t.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", tt.remoteTokenizer)
-			t.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", tt.kvSyncRequested)
+			t.Setenv(constants.EnvKVEventSyncEnabled, tt.kvSyncRequested)
 
 			// Create manager
 			store := &Store{}
@@ -493,7 +494,7 @@ func TestConfigurationDependencies(t *testing.T) {
 // TestPodUpdateScenarios tests various pod update scenarios
 func TestPodUpdateScenarios(t *testing.T) {
 	// Setup environment
-	t.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", "true")
+	t.Setenv(constants.EnvKVEventSyncEnabled, "true")
 	t.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", "true")
 
 	store := &Store{
@@ -506,8 +507,8 @@ func TestPodUpdateScenarios(t *testing.T) {
 			Name:      "test-pod",
 			Namespace: "default",
 			Labels: map[string]string{
-				"model.aibrix.ai/name":              "test-model",
-				"model.aibrix.ai/kv-events-enabled": "true",
+				"model.aibrix.ai/name":         "test-model",
+				constants.KVEventsEnabledLabel: "true",
 			},
 		},
 		Status: v1.PodStatus{
@@ -547,7 +548,7 @@ func TestPodUpdateScenarios(t *testing.T) {
 			oldPod: basePod.DeepCopy(),
 			newPod: func() *v1.Pod {
 				p := basePod.DeepCopy()
-				p.Labels["model.aibrix.ai/kv-events-enabled"] = "false"
+				p.Labels[constants.KVEventsEnabledLabel] = "false"
 				return p
 			}(),
 			description: "Should handle KV events being disabled",
@@ -577,7 +578,7 @@ func TestPodUpdateScenarios(t *testing.T) {
 
 // TestConcurrentPodOperations tests concurrent pod operations
 func TestConcurrentPodOperations(t *testing.T) {
-	t.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", "true")
+	t.Setenv(constants.EnvKVEventSyncEnabled, "true")
 	t.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", "true")
 
 	store := &Store{
@@ -594,8 +595,8 @@ func TestConcurrentPodOperations(t *testing.T) {
 					Name:      fmt.Sprintf("pod-%d", i),
 					Namespace: "default",
 					Labels: map[string]string{
-						"model.aibrix.ai/name":              "test-model",
-						"model.aibrix.ai/kv-events-enabled": "true",
+						"model.aibrix.ai/name":         "test-model",
+						constants.KVEventsEnabledLabel: "true",
 					},
 				},
 				Status: v1.PodStatus{

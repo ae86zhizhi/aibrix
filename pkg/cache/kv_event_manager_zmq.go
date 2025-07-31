@@ -28,6 +28,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/vllm-project/aibrix/pkg/cache/kvcache"
+	"github.com/vllm-project/aibrix/pkg/constants"
 	"github.com/vllm-project/aibrix/pkg/utils"
 )
 
@@ -60,7 +61,7 @@ func NewKVEventManager(store *Store) *KVEventManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Check feature dependencies
-	kvSyncValue := utils.LoadEnv("AIBRIX_KV_EVENT_SYNC_ENABLED", "false")
+	kvSyncValue := utils.LoadEnv(constants.EnvKVEventSyncEnabled, "false")
 	kvSyncRequested, _ := strconv.ParseBool(kvSyncValue)
 	remoteTokenValue := utils.LoadEnv("AIBRIX_USE_REMOTE_TOKENIZER", "false")
 	remoteTokenizerEnabled, _ := strconv.ParseBool(remoteTokenValue)
@@ -239,7 +240,7 @@ func (m *KVEventManager) OnPodDelete(pod *v1.Pod) {
 		modelName := pod.Labels["model.aibrix.ai/name"]
 		if modelName != "" {
 			loraID := int64(-1) // Default no LoRA
-			if loraStr := pod.Labels["model.aibrix.ai/lora-id"]; loraStr != "" {
+			if loraStr := constants.GetLoraID(pod.Labels); loraStr != "" {
 				// Parse LoRA ID if present
 				if parsed, err := strconv.ParseInt(loraStr, 10, 64); err == nil {
 					loraID = parsed
@@ -256,7 +257,7 @@ func (m *KVEventManager) OnPodDelete(pod *v1.Pod) {
 // shouldSubscribe checks if a pod should have KV event subscription
 func (m *KVEventManager) shouldSubscribe(pod *v1.Pod) bool {
 	// Check if KV events are enabled
-	if pod.Labels["model.aibrix.ai/kv-events-enabled"] != kvEventsEnabledValue {
+	if !constants.IsKVEventsEnabled(pod.Labels) {
 		return false
 	}
 

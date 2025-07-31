@@ -33,6 +33,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/vllm-project/aibrix/pkg/constants"
 )
 
 const (
@@ -93,9 +94,9 @@ func (h *KVEventTestHelper) CreateVLLMPodWithKVEvents(t *testing.T, name string,
 			Name:      name,
 			Namespace: h.namespace,
 			Labels: map[string]string{
-				"model.aibrix.ai/name":              h.modelName,
-				"model.aibrix.ai/port":              "8000",
-				"model.aibrix.ai/kv-events-enabled": "true",
+				"model.aibrix.ai/name":         h.modelName,
+				"model.aibrix.ai/port":         "8000",
+				constants.KVEventsEnabledLabel: "true",
 			},
 		},
 		Spec: appsv1.DeploymentSpec{
@@ -109,9 +110,9 @@ func (h *KVEventTestHelper) CreateVLLMPodWithKVEvents(t *testing.T, name string,
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"model.aibrix.ai/name":              h.modelName,
-						"model.aibrix.ai/kv-events-enabled": "true",
-						"app":                               name,
+						"model.aibrix.ai/name":         h.modelName,
+						constants.KVEventsEnabledLabel: "true",
+						"app":                          name,
 					},
 				},
 				Spec: v1.PodSpec{
