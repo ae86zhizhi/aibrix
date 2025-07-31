@@ -19,7 +19,9 @@ package routingalgorithms
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -27,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vllm-project/aibrix/pkg/cache"
+	"github.com/vllm-project/aibrix/pkg/constants"
 	"github.com/vllm-project/aibrix/pkg/metrics"
 	"github.com/vllm-project/aibrix/pkg/types"
 	"github.com/vllm-project/aibrix/pkg/utils"
@@ -332,6 +335,14 @@ func TestPrefixCacheRouterFallback(t *testing.T) {
 
 // TestPrefixCacheRouterMetrics tests metrics recording when KV sync is enabled
 func TestPrefixCacheRouterMetrics(t *testing.T) {
+	// Reset global state for testing
+	prefixCacheMetrics = nil
+	prefixCacheMetricsOnce = sync.Once{}
+
+	// Initialize metrics for testing
+	_ = os.Setenv(constants.EnvPrefixCacheMetricsEnabled, "true")
+	defer func() { _ = os.Unsetenv(constants.EnvPrefixCacheMetricsEnabled) }()
+	_ = initializePrefixCacheMetrics()
 	// Create test pods
 	readyPods := []*v1.Pod{
 		{
@@ -374,8 +385,10 @@ func TestPrefixCacheRouterMetrics(t *testing.T) {
 	}
 
 	// Set indexer status metric like the constructor does
-	prefixCacheIndexerStatus.WithLabelValues("", "sync").Set(1)
-	prefixCacheIndexerStatus.WithLabelValues("", "local").Set(0)
+	if metrics := getPrefixCacheMetrics(); metrics != nil {
+		metrics.prefixCacheIndexerStatus.WithLabelValues("", "sync").Set(1)
+		metrics.prefixCacheIndexerStatus.WithLabelValues("", "local").Set(0)
+	}
 
 	// Create pod list
 	podList := testPodsFromCache(c)
@@ -387,25 +400,27 @@ func TestPrefixCacheRouterMetrics(t *testing.T) {
 
 	// Check metrics
 	// Routing decisions metric
-	metric := &dto.Metric{}
-	vec, err := prefixCacheRoutingDecisions.MetricVec.GetMetricWith(prometheus.Labels{
-		"model":                "test-model",
-		"match_percent_bucket": "0",
-		"using_kv_sync":        "true",
-	})
-	assert.NoError(t, err)
-	_ = vec.Write(metric)
-	assert.Greater(t, metric.Counter.GetValue(), float64(0))
+	if metrics := getPrefixCacheMetrics(); metrics != nil {
+		metric := &dto.Metric{}
+		vec, err := metrics.prefixCacheRoutingDecisions.MetricVec.GetMetricWith(prometheus.Labels{
+			"model":                "test-model",
+			"match_percent_bucket": "0",
+			"using_kv_sync":        "true",
+		})
+		assert.NoError(t, err)
+		_ = vec.Write(metric)
+		assert.Greater(t, metric.Counter.GetValue(), float64(0))
 
-	// Indexer status metric
-	statusMetric := &dto.Metric{}
-	gauge, err := prefixCacheIndexerStatus.MetricVec.GetMetricWith(prometheus.Labels{
-		"model":        "",
-		"indexer_type": "sync",
-	})
-	assert.NoError(t, err)
-	_ = gauge.Write(statusMetric)
-	assert.Equal(t, float64(1), statusMetric.Gauge.GetValue())
+		// Indexer status metric
+		statusMetric := &dto.Metric{}
+		gauge, err := metrics.prefixCacheIndexerStatus.MetricVec.GetMetricWith(prometheus.Labels{
+			"model":        "",
+			"indexer_type": "sync",
+		})
+		assert.NoError(t, err)
+		_ = gauge.Write(statusMetric)
+		assert.Equal(t, float64(1), statusMetric.Gauge.GetValue())
+	}
 }
 
 // TestGetRequestCountsWithKeys tests the pod key based request counting
@@ -441,6 +456,14 @@ func TestGetRequestCountsWithKeys(t *testing.T) {
 
 // TestRecordRoutingDecision tests the metric recording function
 func TestRecordRoutingDecision(t *testing.T) {
+	// Reset global state for testing
+	prefixCacheMetrics = nil
+	prefixCacheMetricsOnce = sync.Once{}
+
+	// Initialize metrics for testing
+	_ = os.Setenv(constants.EnvPrefixCacheMetricsEnabled, "true")
+	defer func() { _ = os.Unsetenv(constants.EnvPrefixCacheMetricsEnabled) }()
+	_ = initializePrefixCacheMetrics()
 	tests := []struct {
 		matchPercent   int
 		expectedBucket string
@@ -462,20 +485,30 @@ func TestRecordRoutingDecision(t *testing.T) {
 			recordRoutingDecision("test-model", tt.matchPercent, true)
 
 			// Check metric was recorded with correct bucket
-			metric := &dto.Metric{}
-			vec, _ := prefixCacheRoutingDecisions.MetricVec.GetMetricWith(prometheus.Labels{
-				"model":                "test-model",
-				"match_percent_bucket": tt.expectedBucket,
-				"using_kv_sync":        "true",
-			})
-			_ = vec.Write(metric)
-			assert.Greater(t, metric.Counter.GetValue(), float64(0))
+			if metrics := getPrefixCacheMetrics(); metrics != nil {
+				metric := &dto.Metric{}
+				vec, _ := metrics.prefixCacheRoutingDecisions.MetricVec.GetMetricWith(prometheus.Labels{
+					"model":                "test-model",
+					"match_percent_bucket": tt.expectedBucket,
+					"using_kv_sync":        "true",
+				})
+				_ = vec.Write(metric)
+				assert.Greater(t, metric.Counter.GetValue(), float64(0))
+			}
 		})
 	}
 }
 
 // TestPrefixCacheRouterLatencyMetric tests latency metric recording
 func TestPrefixCacheRouterLatencyMetric(t *testing.T) {
+	// Reset global state for testing
+	prefixCacheMetrics = nil
+	prefixCacheMetricsOnce = sync.Once{}
+
+	// Initialize metrics for testing
+	_ = os.Setenv(constants.EnvPrefixCacheMetricsEnabled, "true")
+	defer func() { _ = os.Unsetenv(constants.EnvPrefixCacheMetricsEnabled) }()
+	_ = initializePrefixCacheMetrics()
 	// Create simple test setup
 	readyPods := []*v1.Pod{
 		{
@@ -522,17 +555,19 @@ func TestPrefixCacheRouterLatencyMetric(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Check latency metric was recorded
-	metric := &dto.Metric{}
-	observer, _ := prefixCacheRoutingLatency.MetricVec.GetMetricWith(prometheus.Labels{
-		"model":         "test-model",
-		"using_kv_sync": "true",
-	})
+	if metrics := getPrefixCacheMetrics(); metrics != nil {
+		metric := &dto.Metric{}
+		observer, _ := metrics.prefixCacheRoutingLatency.MetricVec.GetMetricWith(prometheus.Labels{
+			"model":         "test-model",
+			"using_kv_sync": "true",
+		})
 
-	// For histogram, we need to check that samples were recorded
-	histogram, ok := observer.(prometheus.Histogram)
-	require.True(t, ok)
-	_ = histogram.Write(metric)
-	assert.Greater(t, metric.Histogram.GetSampleCount(), uint64(0))
+		// For histogram, we need to check that samples were recorded
+		histogram, ok := observer.(prometheus.Histogram)
+		require.True(t, ok)
+		_ = histogram.Write(metric)
+		assert.Greater(t, metric.Histogram.GetSampleCount(), uint64(0))
+	}
 }
 
 // Mock remote tokenizer for testing

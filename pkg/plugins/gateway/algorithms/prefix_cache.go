@@ -22,10 +22,10 @@ import (
 	"math/rand"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/vllm-project/aibrix/pkg/cache"
 	"github.com/vllm-project/aibrix/pkg/constants"
 	"github.com/vllm-project/aibrix/pkg/metrics"
@@ -51,33 +51,99 @@ var (
 	standardDeviationFactor            int                    = utils.LoadEnvInt("AIBRIX_PREFIX_CACHE_STANDARD_DEVIATION_FACTOR", defaultStandardDeviationFactor)
 )
 
-// Metrics for routing decisions
+// PrefixCacheMetrics holds all prefix cache metrics
+type PrefixCacheMetrics struct {
+	prefixCacheRoutingDecisions *prometheus.CounterVec
+	prefixCacheIndexerStatus    *prometheus.GaugeVec
+	prefixCacheRoutingLatency   *prometheus.HistogramVec
+}
+
+// Global metrics instance
 var (
-	prefixCacheRoutingDecisions = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "aibrix_prefix_cache_routing_decisions_total",
-			Help: "Total number of routing decisions by match percentage",
-		},
-		[]string{"model", "match_percent_bucket", "using_kv_sync"},
-	)
-
-	prefixCacheIndexerStatus = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "aibrix_prefix_cache_indexer_status",
-			Help: "Status of prefix cache indexer (1=available, 0=unavailable)",
-		},
-		[]string{"model", "indexer_type"},
-	)
-
-	prefixCacheRoutingLatency = promauto.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "aibrix_prefix_cache_routing_latency_seconds",
-			Help:    "Latency of prefix cache routing decisions",
-			Buckets: prometheus.ExponentialBuckets(0.00001, 2, 15), // 10μs to ~160ms
-		},
-		[]string{"model", "using_kv_sync"},
-	)
+	prefixCacheMetrics     *PrefixCacheMetrics
+	prefixCacheMetricsOnce sync.Once
+	prefixCacheMetricsMu   sync.RWMutex
 )
+
+// createPrefixCacheMetrics creates all prefix cache metrics (but doesn't register them)
+func createPrefixCacheMetrics() *PrefixCacheMetrics {
+	return &PrefixCacheMetrics{
+		prefixCacheRoutingDecisions: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "aibrix_prefix_cache_routing_decisions_total",
+				Help: "Total number of routing decisions by match percentage",
+			},
+			[]string{"model", "match_percent_bucket", "using_kv_sync"},
+		),
+		prefixCacheIndexerStatus: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "aibrix_prefix_cache_indexer_status",
+				Help: "Status of prefix cache indexer (1=available, 0=unavailable)",
+			},
+			[]string{"model", "indexer_type"},
+		),
+		prefixCacheRoutingLatency: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "aibrix_prefix_cache_routing_latency_seconds",
+				Help:    "Latency of prefix cache routing decisions",
+				Buckets: prometheus.ExponentialBuckets(0.00001, 2, 15), // 10μs to ~160ms
+			},
+			[]string{"model", "using_kv_sync"},
+		),
+	}
+}
+
+// registerPrefixCacheMetrics registers all metrics with Prometheus
+func (m *PrefixCacheMetrics) register() error {
+	collectors := []prometheus.Collector{
+		m.prefixCacheRoutingDecisions,
+		m.prefixCacheIndexerStatus,
+		m.prefixCacheRoutingLatency,
+	}
+
+	for _, collector := range collectors {
+		if err := prometheus.Register(collector); err != nil {
+			// If already registered, it's ok (might happen in tests)
+			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+				return fmt.Errorf("failed to register metric: %w", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// initializePrefixCacheMetrics initializes prefix cache metrics if enabled
+func initializePrefixCacheMetrics() error {
+	// Check if metrics are enabled
+	metricsEnabled := utils.LoadEnv(constants.EnvPrefixCacheMetricsEnabled, "false") == "true"
+	if !metricsEnabled {
+		return nil
+	}
+
+	var err error
+	prefixCacheMetricsOnce.Do(func() {
+		prefixCacheMetricsMu.Lock()
+		defer prefixCacheMetricsMu.Unlock()
+
+		metrics := createPrefixCacheMetrics()
+		if registerErr := metrics.register(); registerErr != nil {
+			err = registerErr
+			klog.Errorf("Failed to register prefix cache metrics: %v", registerErr)
+			return
+		}
+		prefixCacheMetrics = metrics
+		klog.Info("Prefix cache metrics registered successfully")
+	})
+	return err
+}
+
+// getPrefixCacheMetrics returns the global metrics instance if available
+func getPrefixCacheMetrics() *PrefixCacheMetrics {
+	prefixCacheMetricsMu.RLock()
+	defer prefixCacheMetricsMu.RUnlock()
+	return prefixCacheMetrics
+}
 
 func init() {
 	Register(RouterPrefixCache, NewPrefixCacheRouter)
@@ -101,6 +167,12 @@ type prefixCacheRouter struct {
 }
 
 func NewPrefixCacheRouter() (types.Router, error) {
+	// Initialize prefix cache metrics if enabled
+	if err := initializePrefixCacheMetrics(); err != nil {
+		klog.Errorf("Failed to initialize prefix cache metrics: %v", err)
+		// Continue without metrics rather than failing
+	}
+
 	// Tokenizer selection logic with dependency awareness
 	var tokenizerObj tokenizer.Tokenizer
 	var remoteTokenizerObj tokenizer.Tokenizer
@@ -193,14 +265,15 @@ func NewPrefixCacheRouter() (types.Router, error) {
 		router.kvSyncRouter = kvSyncRouter
 
 		// Set initial metrics only if KV sync is enabled
-		prefixCacheIndexerStatus.WithLabelValues("", "sync").Set(1)
-		prefixCacheIndexerStatus.WithLabelValues("", "local").Set(0)
+		if metrics := getPrefixCacheMetrics(); metrics != nil {
+			metrics.prefixCacheIndexerStatus.WithLabelValues("", "sync").Set(1)
+			metrics.prefixCacheIndexerStatus.WithLabelValues("", "local").Set(0)
+		}
 	} else {
 		// Set local indexer metrics only if metrics are enabled
-		metricsEnabled := utils.LoadEnv(constants.EnvPrefixCacheMetricsEnabled, "false") == "true"
-		if metricsEnabled {
-			prefixCacheIndexerStatus.WithLabelValues("", "local").Set(1)
-			prefixCacheIndexerStatus.WithLabelValues("", "sync").Set(0)
+		if metrics := getPrefixCacheMetrics(); metrics != nil {
+			metrics.prefixCacheIndexerStatus.WithLabelValues("", "local").Set(1)
+			metrics.prefixCacheIndexerStatus.WithLabelValues("", "sync").Set(0)
 		}
 	}
 
@@ -289,7 +362,9 @@ func (k *kvSyncPrefixCacheRouter) Route(ctx *types.RoutingContext, readyPodList 
 	if k.metricsEnabled {
 		startTime = time.Now()
 		defer func() {
-			prefixCacheRoutingLatency.WithLabelValues(ctx.Model, "true").Observe(time.Since(startTime).Seconds())
+			if metrics := getPrefixCacheMetrics(); metrics != nil {
+				metrics.prefixCacheRoutingLatency.WithLabelValues(ctx.Model, "true").Observe(time.Since(startTime).Seconds())
+			}
 		}()
 	}
 
@@ -565,6 +640,11 @@ func selectPodWithLeastRequestCount(cache cache.Cache, readyPods []*v1.Pod) *v1.
 
 // recordRoutingDecision records metrics for routing decisions
 func recordRoutingDecision(model string, matchPercent int, usingKVSync bool) {
+	metrics := getPrefixCacheMetrics()
+	if metrics == nil {
+		return
+	}
+
 	var bucket string
 	switch {
 	case matchPercent == 0:
@@ -581,5 +661,5 @@ func recordRoutingDecision(model string, matchPercent int, usingKVSync bool) {
 		bucket = "100"
 	}
 
-	prefixCacheRoutingDecisions.WithLabelValues(model, bucket, strconv.FormatBool(usingKVSync)).Inc()
+	metrics.prefixCacheRoutingDecisions.WithLabelValues(model, bucket, strconv.FormatBool(usingKVSync)).Inc()
 }

@@ -99,6 +99,12 @@ func (m *KVEventManager) Start() error {
 
 	klog.Info("Starting KV event manager with remote tokenizer support")
 
+	// Initialize metrics for KV event sync
+	if err := kvcache.InitializeMetrics(); err != nil {
+		klog.Errorf("Failed to initialize KV cache metrics: %v", err)
+		// Continue without metrics rather than failing
+	}
+
 	// Process existing pods
 	m.store.metaPods.Range(func(key string, pod *Pod) bool {
 		if m.shouldSubscribe(pod.Pod) {
