@@ -17,14 +17,3 @@ limitations under the License.
 */
 
 package cache
-
-import "encoding/binary"
-
-// tokenIDsToBytes converts int32 token IDs to byte array (for tests)
-func tokenIDsToBytes(tokenIDs []int32) []byte {
-	bytes := make([]byte, len(tokenIDs)*4)
-	for i, id := range tokenIDs {
-		binary.BigEndian.PutUint32(bytes[i*4:], uint32(id))
-	}
-	return bytes
-}

@@ -17,13 +17,13 @@
 package cache
 
 import (
-	"testing"
 	"os"
+	"testing"
 )
 
 func TestBuildModeIsZMQ(t *testing.T) {
 	t.Log("✅ Verified ZMQ build")
-	
+
 	// Set environment to enable KV sync
 	os.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", "true")
 	os.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", "true")
@@ -31,15 +31,15 @@ func TestBuildModeIsZMQ(t *testing.T) {
 		os.Unsetenv("AIBRIX_KV_EVENT_SYNC_ENABLED")
 		os.Unsetenv("AIBRIX_USE_REMOTE_TOKENIZER")
 	}()
-	
+
 	// Verify ZMQ implementation behavior
 	manager := NewKVEventManager(nil)
-	
+
 	// Verify we got a manager instance
 	if manager == nil {
 		t.Error("ZMQ build should return a valid manager instance")
 	}
-	
+
 	// In ZMQ build with env vars set, manager should be enabled
 	// (actual behavior depends on implementation details)
 	t.Log("ZMQ implementation available")

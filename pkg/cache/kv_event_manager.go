@@ -21,7 +21,6 @@ package cache
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	v1 "k8s.io/api/core/v1"
 )
@@ -32,8 +31,6 @@ type KVEventManager struct {
 	enabled bool
 	ctx     context.Context
 	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	mu      sync.RWMutex
 }
 
 // NewKVEventManager creates a stub KV event manager

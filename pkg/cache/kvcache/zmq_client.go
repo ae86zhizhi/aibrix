@@ -27,7 +27,6 @@ import (
 	"k8s.io/klog/v2"
 )
 
-
 // ZMQClient manages ZMQ connections to vLLM KV event publishers
 type ZMQClient struct {
 	config *ZMQClientConfig

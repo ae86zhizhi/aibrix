@@ -57,7 +57,7 @@ help: ## Display this help.
 ##@ Development
 
 GINKGO_VERSION ?= $(shell go list -m -f '{{.Version}}' github.com/onsi/ginkgo/v2)
-INTEGRATION_TARGET ?= ./test/integration/...
+INTEGRATION_TARGET ?= ./test/integration/webhook/...
 
 GINKGO = $(shell pwd)/bin/ginkgo
 .PHONY: ginkgo
@@ -102,10 +102,23 @@ test-code-coverage: test
 test-race-condition: manifests generate fmt vet envtest ## Run tests with race detection enabled.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -race $$(go list ./... | grep -v /e2e)
 
-.PHONY: test-integration
-test-integration: manifests fmt vet envtest ginkgo ## Run integration tests.
+# Default integration tests (do not require ZMQ)
+.PHONY: test-integration-default
+test-integration-default: manifests fmt vet envtest ginkgo ## Run default integration tests (no ZMQ required).
+	@echo "--- Running Default Integration Tests ---"
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
-	$(GINKGO) --junit-report=junit.xml --output-dir=$(ARTIFACTS) -v $(INTEGRATION_TARGET)
+	$(GINKGO) --junit-report=junit-default.xml --output-dir=$(ARTIFACTS) -v ./test/integration/webhook/...
+
+# ZMQ-specific integration tests
+.PHONY: test-integration-zmq
+test-integration-zmq: manifests fmt vet envtest ginkgo ## Run ZMQ-specific integration tests.
+	@echo "--- Running ZMQ Integration Tests ---"
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	$(GINKGO) --junit-report=junit-zmq.xml --output-dir=$(ARTIFACTS) -v -tags="zmq" ./test/integration/...
+
+# Run all integration tests (default + ZMQ)
+.PHONY: test-integration
+test-integration: test-integration-default test-integration-zmq ## Run all integration tests (default + ZMQ).
 
 # Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
 .PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
