@@ -21,6 +21,7 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	v1 "k8s.io/api/core/v1"
@@ -45,6 +46,12 @@ func NewKVEventManager(store *Store) *KVEventManager {
 		ctx:     ctx,
 		cancel:  cancel,
 	}
+}
+
+// validateConfiguration validates the manager configuration
+func (m *KVEventManager) validateConfiguration() error {
+	// KV event sync requires ZMQ support which is not available in this build
+	return fmt.Errorf("KV event sync requires ZMQ support (build without nozmq tag)")
 }
 
 // Start is a no-op
