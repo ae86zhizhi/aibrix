@@ -283,11 +283,16 @@ func NewPrefixCacheRouter() (types.Router, error) {
 		cache:              c,
 		tokenizer:          tokenizerObj,
 		prefixCacheIndexer: prefixcacheindexer.NewPrefixHashTable(),
-		tokenizerPool:      tokenizerPool, // May be nil when feature disabled
+		// Only assign tokenizerPool if it's not nil to avoid interface nil issues
+	}
+
+	// Only set tokenizerPool if it was actually created
+	if tokenizerPool != nil {
+		router.tokenizerPool = tokenizerPool
 	}
 
 	// Only create KV sync router if enabled
-	if kvSyncEnabled && useRemoteTokenizer {
+	if kvSyncEnabled && useRemoteTokenizer && tokenizerPool != nil {
 		kvSyncRouter := &kvSyncPrefixCacheRouter{
 			cache:          c,
 			tokenizerPool:  tokenizerPool, // Pass the pool reference
