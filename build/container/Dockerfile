@@ -1,49 +1,26 @@
-# Build the manager binary
+# build/container/Dockerfile
 FROM golang:1.22 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
 WORKDIR /workspace
 
-# Install ZMQ dependencies
-RUN apt-get update && apt-get install -y \
-    libzmq3-dev \
-    pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy the Go Modules manifests
-COPY go.mod go.mod
-COPY go.sum go.sum
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
+# Copy Go modules
+COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy the go source
+# Copy source
 COPY cmd/ cmd/
 COPY api/ api/
 COPY pkg/ pkg/
 
-# Build with CGO enabled for ZMQ support
-# the GOARCH has not a default value to allow the binary be built according to the host where the command
-# was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
-# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
-# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -tags zmq -a -o manager cmd/controllers/main.go
+# Build without ZMQ (controller doesn't need it)
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -tags="nozmq" -a -o manager cmd/controllers/main.go
 
-# Use debian-slim as base image since we need ZMQ libraries at runtime
-FROM debian:bookworm-slim
-
-# Install ZMQ runtime dependencies
-RUN apt-get update && apt-get install -y \
-    libzmq5 \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
+# Use consistent base image
+FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/manager .
-
-# Create non-root user
-RUN useradd -u 65532 -U nonroot
 USER 65532:65532
-
 ENTRYPOINT ["/manager"]

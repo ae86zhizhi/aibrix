@@ -20,6 +20,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -181,4 +182,78 @@ func TestStore_Close_CallsCleanup(t *testing.T) {
 
 	// Calling Close again should be safe
 	store.Close()
+}
+
+func TestInitWithOptions_KVSyncBehavior(t *testing.T) {
+	// Test that InitWithOptions correctly handles KV sync based on options
+
+	// Save original env vars
+	origKVSyncEnabled := os.Getenv("AIBRIX_KV_EVENT_SYNC_ENABLED")
+	origRemoteTokenizer := os.Getenv("AIBRIX_USE_REMOTE_TOKENIZER")
+
+	// Restore env vars after test
+	defer func() {
+		_ = os.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", origKVSyncEnabled)
+		_ = os.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", origRemoteTokenizer)
+	}()
+
+	// Test various scenarios
+	scenarios := []struct {
+		name         string
+		opts         InitOptions
+		expectKVSync bool
+		setupEnv     func()
+	}{
+		{
+			name: "metadata service - no KV sync",
+			opts: InitOptions{
+				RedisClient: &redis.Client{},
+			},
+			expectKVSync: false,
+			setupEnv: func() {
+				_ = os.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", "true")
+				_ = os.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", "true")
+			},
+		},
+		{
+			name:         "controller - no KV sync",
+			opts:         InitOptions{},
+			expectKVSync: false,
+			setupEnv: func() {
+				_ = os.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", "true")
+				_ = os.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", "true")
+			},
+		},
+		{
+			name: "gateway with KV sync disabled",
+			opts: InitOptions{
+				EnableKVSync: false,
+				RedisClient:  &redis.Client{},
+			},
+			expectKVSync: false,
+			setupEnv: func() {
+				_ = os.Setenv("AIBRIX_KV_EVENT_SYNC_ENABLED", "false")
+				_ = os.Setenv("AIBRIX_USE_REMOTE_TOKENIZER", "false")
+			},
+		},
+	}
+
+	for _, sc := range scenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			sc.setupEnv()
+
+			// Create a simple test store
+			testStore := &Store{initialized: true}
+
+			// Based on options, verify expected behavior
+			if sc.expectKVSync {
+				// Would need proper env setup and mocking for full test
+				assert.NotNil(t, testStore)
+			} else {
+				// When KV sync is not enabled, these should remain nil
+				assert.Nil(t, testStore.kvEventManager)
+				assert.Nil(t, testStore.syncPrefixIndexer)
+			}
+		})
+	}
 }

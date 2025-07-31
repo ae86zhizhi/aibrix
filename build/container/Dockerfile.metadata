@@ -1,31 +1,28 @@
-# Build stage - metadata-service specific
+# build/container/Dockerfile.metadata
 FROM golang:1.22 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
 WORKDIR /workspace
 
-# Copy the Go Modules manifests
+# No need for ZMQ dependencies
+
+# Copy Go modules
 COPY go.mod go.sum ./
-# Cache deps before building and copying source
 RUN go mod download
 
-# Copy the go source
+# Copy source
 COPY cmd/ cmd/
 COPY api/ api/
 COPY pkg/ pkg/
 
-# Build WITHOUT zmq for metadata-service
-# CGO_ENABLED=0 for static binary, nozmq build tag to exclude ZMQ dependencies
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
-    -tags="nozmq" \
-    -ldflags="-w -s" \
-    -a -o metadata-service cmd/metadata/main.go
+# Build without ZMQ
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -tags="nozmq" -a -o metadata-service cmd/metadata/main.go
 
-# Runtime stage - use distroless for minimal footprint
+# Use consistent base image
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/metadata-service .
 USER 65532:65532
-
 ENTRYPOINT ["/metadata-service"]

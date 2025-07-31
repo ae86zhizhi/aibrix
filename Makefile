@@ -448,6 +448,14 @@ envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
+# Helper target to verify all images use distroless
+.PHONY: verify-distroless
+verify-distroless: ## Verify all images use distroless base
+	@echo "Verifying all images use distroless base..."
+	@docker inspect $(AIBRIX_CONTAINER_REGISTRY_NAMESPACE)/aibrix-controller-manager:$(IMG_TAG) | grep -q "gcr.io/distroless/static" && echo "✓ controller-manager" || echo "✗ controller-manager"
+	@docker inspect $(AIBRIX_CONTAINER_REGISTRY_NAMESPACE)/aibrix-gateway-plugins:$(IMG_TAG) | grep -q "gcr.io/distroless/static" && echo "✓ gateway-plugins" || echo "✗ gateway-plugins"
+	@docker inspect $(AIBRIX_CONTAINER_REGISTRY_NAMESPACE)/aibrix-metadata-service:$(IMG_TAG) | grep -q "gcr.io/distroless/static" && echo "✓ metadata-service" || echo "✗ metadata-service"
+
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)

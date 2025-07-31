@@ -41,6 +41,18 @@ var (
 	once  sync.Once  // Singleton pattern control lock
 )
 
+// InitOptions configures the cache initialization behavior
+type InitOptions struct {
+	// EnableKVSync configures whether to start the ZMQ KV event sync
+	EnableKVSync bool
+
+	// RedisClient is required for KVSync and other features. Can be nil.
+	RedisClient *redis.Client
+
+	// ModelRouterProvider is needed only by the gateway. Can be nil.
+	ModelRouterProvider ModelRouterProviderFunc
+}
+
 const (
 	// For output predictor
 	maxInputTokens  = 1024 * 1024       // 1M
@@ -246,53 +258,70 @@ func InitForTest() *Store {
 	return store
 }
 
-// Init initializes the cache store (singleton pattern)
+// InitWithOptions initializes the cache store with configurable behavior
 // Parameters:
 //
 //	config: Kubernetes configuration
 //	stopCh: Stop signal channel
-//	redisClient: Redis client instance
+//	opts: Configuration options for initialization
 //
 // Returns:
 //
 //	*Store: Pointer to initialized store instance
-func Init(config *rest.Config, stopCh <-chan struct{}) *Store {
-	// Configure cache components
-	enableGPUOptimizerTracing = false
-	enableModelGPUProfileCaching = false
-	return InitForGateway(config, stopCh, nil, nil)
-}
-
-func InitForMetadata(config *rest.Config, stopCh <-chan struct{}, redisClient *redis.Client) *Store {
-	// Configure cache components
-	enableGPUOptimizerTracing = false
-	enableModelGPUProfileCaching = false
-	return InitForGateway(config, stopCh, redisClient, nil)
-}
-
-func InitForGateway(config *rest.Config, stopCh <-chan struct{}, redisClient *redis.Client, modelRouterProvider ModelRouterProviderFunc) *Store {
+func InitWithOptions(config *rest.Config, stopCh <-chan struct{}, opts InitOptions) *Store {
 	once.Do(func() {
-		klog.InfoS("initialize cache for gateway",
+		// Log initialization based on configuration
+		var service string
+		if opts.EnableKVSync {
+			service = "gateway"
+		} else if opts.RedisClient != nil {
+			service = "metadata"
+		} else {
+			service = "controllers"
+		}
+
+		klog.InfoS("initialize cache",
+			"service", service,
+			"enableKVSync", opts.EnableKVSync,
+			"hasRedisClient", opts.RedisClient != nil,
+			"hasModelRouterProvider", opts.ModelRouterProvider != nil,
 			"enableModelGPUProfileCaching", enableModelGPUProfileCaching,
 			"enableGPUOptimizerTracing", enableGPUOptimizerTracing)
-		store = New(redisClient, initPrometheusAPI(), modelRouterProvider)
+
+		// Configure cache components based on service needs
+		if service == "metadata" || service == "controllers" {
+			enableGPUOptimizerTracing = false
+			enableModelGPUProfileCaching = false
+		}
+
+		// Create store with provided dependencies
+		store = New(opts.RedisClient, initPrometheusAPI(), opts.ModelRouterProvider)
 
 		// Initialize cache components
 		if err := initCacheInformers(store, config, stopCh); err != nil {
 			panic(err)
 		}
 		initMetricsCache(store, stopCh)
+
+		// Initialize profile cache if enabled
 		if store.enableProfileCaching {
 			initProfileCache(store, stopCh, false)
 		}
-		if store.enableTracing {
-			initTraceCache(redisClient, stopCh)
+
+		// Initialize trace cache if enabled and Redis is available
+		if store.enableTracing && opts.RedisClient != nil {
+			initTraceCache(opts.RedisClient, stopCh)
 		}
 
 		// Initialize KV event sync if enabled
-		if err := store.initKVEventSync(); err != nil {
-			klog.Errorf("Failed to initialize KV event sync: %v", err)
-			// Continue without KV sync - this is not a fatal error
+		if opts.EnableKVSync {
+			if opts.RedisClient == nil {
+				klog.Fatalf("InitOptions: EnableKVSync is true but RedisClient is nil")
+			}
+			if err := store.initKVEventSync(); err != nil {
+				klog.Errorf("Failed to initialize KV event sync: %v", err)
+				// Continue without KV sync - this is not a fatal error
+			}
 		}
 	})
 
