@@ -1,5 +1,4 @@
-//go:build zmq || !nozmq
-// +build zmq !nozmq
+//go:build zmq
 
 /*
 Copyright 2024 The Aibrix Team.

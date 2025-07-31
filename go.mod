@@ -18,6 +18,7 @@ require (
 	github.com/onsi/gomega v1.35.1
 	github.com/open-policy-agent/cert-controller v0.12.0
 	github.com/openai/openai-go v1.1.0
+	github.com/pebbe/zmq4 v1.2.10
 	github.com/pkoukk/tiktoken-go v0.1.7
 	github.com/pkoukk/tiktoken-go-loader v0.0.1
 	github.com/prometheus/client_golang v1.20.2
@@ -25,6 +26,7 @@ require (
 	github.com/prometheus/common v0.55.0
 	github.com/ray-project/kuberay/ray-operator v1.2.1
 	github.com/redis/go-redis/v9 v9.6.1
+	github.com/shamaton/msgpack/v2 v2.1.1
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/atomic v1.11.0
 	google.golang.org/grpc v1.65.0
@@ -84,11 +86,9 @@ require (
 	github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f // indirect
 	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f // indirect
 	github.com/nxadm/tail v1.4.8 // indirect
-	github.com/pebbe/zmq4 v1.2.10 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
-	github.com/shamaton/msgpack/v2 v2.1.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect

@@ -92,7 +92,7 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -tags="zmq" $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 .PHONY: test-code-coverage
 test-code-coverage: test
@@ -100,7 +100,7 @@ test-code-coverage: test
 
 .PHONY: test-race-condition
 test-race-condition: manifests generate fmt vet envtest ## Run tests with race detection enabled.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -tags="zmq" -race $$(go list ./... | grep -v /e2e)
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -race $$(go list ./... | grep -v /e2e)
 
 .PHONY: test-integration
 test-integration: manifests fmt vet envtest ginkgo ## Run integration tests.
@@ -147,6 +147,10 @@ test-kv-sync-chaos: ## Run KV sync chaos tests (requires Chaos Mesh).
 test-kv-sync-all: test-zmq test-kv-sync test-kv-sync-e2e ## Run all KV sync tests (unit, integration, E2E).
 	@echo "All KV sync tests completed"
 
+.PHONY: test-with-zmq
+test-with-zmq: manifests generate fmt vet envtest ## Run full test suite with ZMQ support.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -tags="zmq" $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter & yamllint
 	$(GOLANGCI_LINT) run
@@ -179,7 +183,7 @@ build: manifests generate fmt vet ## Build manager binary.
 
 .PHONY: build-controller-manager
 build-controller-manager: manifests generate fmt vet ## Build controller-manager binary without ZMQ.
-	CGO_ENABLED=0 go build -tags="nozmq" -o bin/controller-manager cmd/controllers/main.go
+	CGO_ENABLED=0 go build -o bin/controller-manager cmd/controllers/main.go
 
 .PHONY: build-gateway-plugins
 build-gateway-plugins: manifests generate fmt vet ## Build gateway-plugins binary with ZMQ.
@@ -187,7 +191,7 @@ build-gateway-plugins: manifests generate fmt vet ## Build gateway-plugins binar
 
 .PHONY: build-metadata-service
 build-metadata-service: manifests generate fmt vet ## Build metadata-service binary without ZMQ.
-	CGO_ENABLED=0 go build -tags="nozmq" -o bin/metadata-service cmd/metadata/main.go
+	CGO_ENABLED=0 go build -o bin/metadata-service cmd/metadata/main.go
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/controllers/main.go

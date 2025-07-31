@@ -16,7 +16,7 @@ COPY pkg/ pkg/
 
 # Build without ZMQ (controller doesn't need it)
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
-    go build -tags="nozmq" -a -o manager cmd/controllers/main.go
+    go build -a -o manager cmd/controllers/main.go
 
 # Use consistent base image
 FROM gcr.io/distroless/static:nonroot

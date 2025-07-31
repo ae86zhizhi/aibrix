@@ -1,3 +1,5 @@
+//go:build zmq
+
 // Copyright 2025 The AIBrix Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"net"
 	"sync"
 	"time"
 
@@ -26,76 +27,6 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// Constants for ZMQ client configuration
-const (
-	// Default ZMQ ports
-	DefaultPubPort    = 5557
-	DefaultRouterPort = 5558
-
-	// Timeouts and intervals
-	DefaultPollTimeout       = 100 * time.Millisecond
-	DefaultReplayTimeout     = 5 * time.Second
-	DefaultReconnectInterval = 1 * time.Second
-	MaxReconnectInterval     = 30 * time.Second
-	ReconnectBackoffFactor   = 2.0
-
-	// Buffer sizes
-	EventChannelBufferSize = 1000
-)
-
-// EventHandler processes received KV events
-type EventHandler interface {
-	HandleEvent(event KVEvent) error
-}
-
-// ZMQClientConfig contains configuration for the ZMQ client
-type ZMQClientConfig struct {
-	PodKey         string
-	PodIP          string
-	ModelName      string
-	PubPort        int
-	RouterPort     int
-	PollTimeout    time.Duration
-	ReplayTimeout  time.Duration
-	ReconnectDelay time.Duration
-}
-
-// DefaultZMQClientConfig returns a default configuration
-func DefaultZMQClientConfig(podKey, podIP, modelName string) *ZMQClientConfig {
-	return &ZMQClientConfig{
-		PodKey:         podKey,
-		PodIP:          podIP,
-		ModelName:      modelName,
-		PubPort:        DefaultPubPort,
-		RouterPort:     DefaultRouterPort,
-		PollTimeout:    DefaultPollTimeout,
-		ReplayTimeout:  DefaultReplayTimeout,
-		ReconnectDelay: DefaultReconnectInterval,
-	}
-}
-
-// ValidateConfig validates the ZMQ client configuration
-func ValidateConfig(config *ZMQClientConfig) error {
-	if config.PodIP == "" {
-		return fmt.Errorf("pod IP is required")
-	}
-
-	// Validate IP address format
-	if ip := net.ParseIP(config.PodIP); ip == nil {
-		return fmt.Errorf("invalid IP address: %s", config.PodIP)
-	}
-
-	// Validate port ranges
-	if config.PubPort <= 0 || config.PubPort > 65535 {
-		return fmt.Errorf("invalid publisher port: %d", config.PubPort)
-	}
-
-	if config.RouterPort <= 0 || config.RouterPort > 65535 {
-		return fmt.Errorf("invalid router port: %d", config.RouterPort)
-	}
-
-	return nil
-}
 
 // ZMQClient manages ZMQ connections to vLLM KV event publishers
 type ZMQClient struct {
