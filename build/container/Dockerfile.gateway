@@ -5,14 +5,8 @@ ARG TARGETARCH
 
 WORKDIR /workspace
 
-# Install build dependencies for static ZMQ
 RUN apt-get update && apt-get install -y \
-    build-essential cmake git wget pkg-config \
-    libtool autoconf automake
-
-# Build static libzmq
-COPY scripts/build-static-zmq.sh /tmp/
-RUN chmod +x /tmp/build-static-zmq.sh && /tmp/build-static-zmq.sh
+    libkrb5-dev krb5-multidev libzmq3-dev libsodium-dev
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -28,8 +22,18 @@ COPY pkg/ pkg/
 
 # Build with static linking
 ENV CGO_ENABLED=1
-ENV CGO_LDFLAGS="-L/usr/local/lib -lzmq -lsodium -lstdc++ -lpthread -lm -static"
-ENV PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
+ENV CGO_LDFLAGS="\
+  -L/usr/lib/x86_64-linux-gnu \
+  -l:libzmq.a \
+  -l:libsodium.a \
+  -lgssapi_krb5 \
+  -lkrb5 \
+  -lk5crypto \
+  -lcom_err \
+  -lresolv \
+  -ldl \
+  -lpthread \
+  -lm"
 
 RUN GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
     go build -tags zmq \
