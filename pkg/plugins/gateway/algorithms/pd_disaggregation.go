@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/vllm-project/aibrix/pkg/cache"
+	"github.com/vllm-project/aibrix/pkg/constants"
 	"github.com/vllm-project/aibrix/pkg/types"
 	"github.com/vllm-project/aibrix/pkg/utils"
 	"github.com/vllm-project/aibrix/pkg/utils/prefixcacheindexer"
@@ -40,8 +41,8 @@ const (
 	VLLMEngine                    string                 = "vllm"
 	SGLangEngine                  string                 = "sglang"
 	SGLangBootstrapPort           int64                  = 8998
-	SGLangBootstrapPortIdentifier string                 = "model.aibrix.ai/sglang-bootstrap-port"
-	LLMEngineIdentifier           string                 = "model.aibrix.ai/engine"
+	SGLangBootstrapPortIdentifier string                 = constants.ModelLabelSGLangBootstrapPort
+	LLMEngineIdentifier           string                 = constants.ModelLabelEngine
 	PDRoleIdentifier              string                 = "role-name"
 	RoleReplicaIndex              string                 = "stormservice.orchestration.aibrix.ai/role-replica-index"
 	PodGroupIndex                 string                 = "stormservice.orchestration.aibrix.ai/pod-group-index"

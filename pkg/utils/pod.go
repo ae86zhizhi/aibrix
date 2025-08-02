@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/vllm-project/aibrix/pkg/constants"
 	"k8s.io/klog/v2"
 
 	v1 "k8s.io/api/core/v1"
@@ -33,7 +34,6 @@ import (
 
 const (
 	NAMESPACE            = "aibrix-system"
-	modelPortIdentifier  = "model.aibrix.ai/port"
 	defaultPodMetricPort = 8000
 )
 
@@ -318,21 +318,21 @@ func SelectRandomPod(pods []*v1.Pod, randomFn func(int) int) (*v1.Pod, error) {
 }
 
 func GetModelPortForPod(requestID string, pod *v1.Pod) int64 {
-	value, ok := pod.Labels[modelPortIdentifier]
+	value, ok := pod.Labels[constants.ModelLabelPort]
 	if !ok {
 		klog.Warningf("requestID: %v, pod: %v is missing port identifier label: %v, hence default to port: %v",
-			requestID, pod.Name, modelPortIdentifier, defaultPodMetricPort)
+			requestID, pod.Name, constants.ModelLabelPort, defaultPodMetricPort)
 		// if pod.Labels == nil {
 		// 	pod.Labels = make(map[string]string)
 		// }
-		// pod.Labels[modelPortIdentifier] = strconv.Itoa(defaultPodMetricPort)
+		// pod.Labels[constants.ModelLabelPort] = strconv.Itoa(defaultPodMetricPort)
 		return defaultPodMetricPort
 	}
 
 	modelPort, err := strconv.ParseInt(value, 10, 32)
 	if err != nil {
 		klog.Warningf("requestID: %v, pod: %v has incorrect value: %v for port identifier label: %v, hence default to port: %v",
-			requestID, pod.Name, value, modelPortIdentifier, defaultPodMetricPort)
+			requestID, pod.Name, value, constants.ModelLabelPort, defaultPodMetricPort)
 		modelPort = defaultPodMetricPort
 	}
 	return modelPort

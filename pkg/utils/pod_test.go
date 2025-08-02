@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vllm-project/aibrix/pkg/constants"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/assert"
@@ -208,7 +209,7 @@ func TestModePortForPod(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "p1",
 					Labels: map[string]string{
-						"model.aibrix.ai/port": "9000",
+						constants.ModelLabelPort: "9000",
 					},
 				},
 			},
@@ -220,7 +221,7 @@ func TestModePortForPod(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "p1",
 					Labels: map[string]string{
-						"model.aibrix.ai/port": "port",
+						constants.ModelLabelPort: "port",
 					},
 				},
 			},
