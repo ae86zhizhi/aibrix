@@ -24,6 +24,7 @@ import (
 	"strconv"
 
 	"github.com/vllm-project/aibrix/pkg/cache/kvcache"
+	"github.com/vllm-project/aibrix/pkg/constants"
 	syncindexer "github.com/vllm-project/aibrix/pkg/utils/syncprefixcacheindexer"
 	"k8s.io/klog/v2"
 )
@@ -127,7 +128,7 @@ func (h *kvEventHandler) getLoraID() int64 {
 	// Look up pod from cache
 	if metaPod, exists := h.manager.store.metaPods.Load(h.podKey); exists {
 		// Extract LoRA ID from labels
-		if loraStr, exists := metaPod.Pod.Labels["model.aibrix.ai/lora-id"]; exists {
+		if loraStr, exists := metaPod.Pod.Labels[constants.LoraIDLabel]; exists {
 			if loraID, err := strconv.ParseInt(loraStr, 10, 64); err == nil {
 				return loraID
 			}
