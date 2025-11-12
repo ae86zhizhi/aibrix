@@ -241,7 +241,7 @@ func (s *defaultDecodeSelector) evaluateDecodePods(
 	candidates := make([]DecodeCandidate, 0, len(decodePods))
 
 	for _, pod := range decodePods {
-		metrics, ok := metricsMap[pod.IPPort]
+		metrics, ok := metricsMap[pod.Key()]
 		if !ok {
 			klog.V(4).Infof("No metrics found for decode pod %s, skipping", pod.IPPort)
 			continue

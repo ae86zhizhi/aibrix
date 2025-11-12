@@ -263,40 +263,52 @@ func TestE2E_GracefulDegradation(t *testing.T) {
 
 // Helper functions
 
-// SimplePodList implements types.PodList for testing
-type SimplePodList struct {
-	pods []*v1.Pod
-}
-
-func (p *SimplePodList) All() []*v1.Pod {
-	return p.pods
-}
-
-func (p *SimplePodList) Len() int {
-	return len(p.pods)
-}
-
-func (p *SimplePodList) Indexes() []string {
-	return []string{"default"}
-}
-
-func (p *SimplePodList) ListByIndex(index string) []*v1.Pod {
-	return p.pods
-}
-
 func createE2ERouter(t *testing.T) *kvAwareRouter {
-	// Set environment for testing
-	t.Setenv("AIBRIX_KV_AWARE_ENABLED", "true")
-	t.Setenv("AIBRIX_KV_TRANSFER_ENABLED", "false")
-	t.Setenv("AIBRIX_KV_TRANSFER_BW_GBPS", "100")
-	t.Setenv("AIBRIX_TTFT_SLO_SECONDS", "3")
-	t.Setenv("AIBRIX_TBT_SLO_MS", "200")
+	// Create test configuration directly
+	config := &KVAwareConfig{
+		Enabled:              true,
+		EnableKVTransfer:     false,
+		TransferBandwidthBps: 1.25e10, // 100 Gbps
+		TTFTSLO:              3 * time.Second,
+		TBTSLO:               200 * time.Millisecond,
+		KVCopyThresholdBlk:   2,
+		EMAAlpha:             0.7,
+		PromEnabled:          false,
+		Models: []ModelKVSpec{
+			{
+				ModelName:       "llama3-70b",
+				PerTokenKVBytes: 327680,
+				BlockSizeTokens: 16,
+			},
+		},
+	}
 
-	router, err := NewKVAwareRouter()
-	assert.NoError(t, err)
-	assert.NotNil(t, router)
+	// Use mock implementations for testing
+	tokenizer := NewTokenizer()
+	prefixMatcher := &mockE2EPrefixMatcher{}
+	metricsReader := &mockE2EMetricsReader{}
+	metricsCache := newMetricsCache(5 * time.Second)
+	ttftEstimator := NewTTFTEstimator(config)
+	decodeSelector := NewDecodeSelector(config)
+	sloChecker := NewSLOChecker()
+	stats := NewRoutingStatistics()
 
-	return router.(*kvAwareRouter)
+	router := &kvAwareRouter{
+		config:         config,
+		cache:          nil, // Not needed for E2E tests
+		prefixIndexer:  nil, // Mocked via prefixMatcher
+		prefixMatcher:  prefixMatcher,
+		tokenizer:      tokenizer,
+		metricsReader:  metricsReader,
+		metricsCache:   metricsCache,
+		ttftEstimator:  ttftEstimator,
+		decodeSelector: decodeSelector,
+		sloChecker:     sloChecker,
+		stats:          stats,
+		fallbackAlgo:   "least-request",
+	}
+
+	return router
 }
 
 func createE2ERoutingContext(requestID, message string) *types.RoutingContext {
@@ -359,4 +371,81 @@ func createE2EPodList(numPrefill, numDecode int) types.PodList {
 	}
 
 	return &SimplePodList{pods: pods}
+}
+
+// mockE2EPrefixMatcher provides mock prefix matching for E2E tests
+type mockE2EPrefixMatcher struct{}
+
+func (m *mockE2EPrefixMatcher) ComputePrefixMatch(
+	modelName string, loraID int64, tokens []int, pods []PodRef, blockSize int,
+) (PrefixMatch, error) {
+	// Simulate varying cache hit rates for E2E tests
+	matchBlocks := len(tokens) / blockSize / 3 // ~33% cache hit
+	podPrefixBlocks := make(map[string]int)
+
+	for i, pod := range pods {
+		// First pod gets best match, others get less
+		if i == 0 {
+			podPrefixBlocks[pod.Key()] = matchBlocks
+		} else {
+			podPrefixBlocks[pod.Key()] = matchBlocks / 2
+		}
+	}
+
+	if len(pods) > 0 {
+		return PrefixMatch{
+			PodPrefixBlocks: podPrefixBlocks,
+			BestPod:         pods[0].Key(),
+			BestBlocks:      matchBlocks,
+		}, nil
+	}
+
+	return PrefixMatch{
+		PodPrefixBlocks: make(map[string]int),
+		BestBlocks:      0,
+	}, nil
+}
+
+// mockE2EMetricsReader provides mock metrics for E2E tests
+type mockE2EMetricsReader struct{}
+
+func (m *mockE2EMetricsReader) GetPodMetrics(pod PodRef) (PodMetrics, error) {
+	meanPrefill := 0.5
+	p95Queue := 0.2
+	p95Tpot := 0.15
+	avgTpot := 0.12
+
+	// Vary metrics based on pod role
+	numWaiting := 2.0
+	numRunning := 3.0
+	gpuCache := 60.0
+
+	if pod.Role == RoleDecode {
+		numRunning = 5.0
+		gpuCache = 70.0
+	}
+
+	return PodMetrics{
+		NumWaiting:       numWaiting,
+		NumRunning:       numRunning,
+		GPUCacheUsage:    gpuCache,
+		CPUCacheUsage:    40.0,
+		PromptTokPerS:    1000.0,
+		GenTokPerS:       100.0,
+		MeanPrefillSec:   &meanPrefill,
+		P95QueueSec:      &p95Queue,
+		P95TPOTSec:       &p95Tpot,
+		AvgTPOTSec:       &avgTpot,
+		LastUpdated:      time.Now(),
+		MetricsAvailable: true,
+	}, nil
+}
+
+func (m *mockE2EMetricsReader) BatchGetPodMetrics(pods []PodRef) map[string]PodMetrics {
+	result := make(map[string]PodMetrics)
+	for _, pod := range pods {
+		metrics, _ := m.GetPodMetrics(pod)
+		result[pod.Key()] = metrics
+	}
+	return result
 }

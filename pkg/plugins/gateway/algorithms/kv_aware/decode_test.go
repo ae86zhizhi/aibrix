@@ -242,8 +242,8 @@ func TestSelectDecodePod(t *testing.T) {
 		p95_1 := 0.05
 		p95_2 := 0.08
 		metricsMap := map[string]PodMetrics{
-			"10.0.0.1:8080": {P95TPOTSec: &p95_1, NumRunning: 1.0, GenTokPerS: 400.0, GPUCacheUsage: 40.0},
-			"10.0.0.2:8080": {P95TPOTSec: &p95_2, NumRunning: 2.0, GenTokPerS: 300.0, GPUCacheUsage: 60.0},
+			"default/pod-1": {P95TPOTSec: &p95_1, NumRunning: 1.0, GenTokPerS: 400.0, GPUCacheUsage: 40.0},
+			"default/pod-2": {P95TPOTSec: &p95_2, NumRunning: 2.0, GenTokPerS: 300.0, GPUCacheUsage: 60.0},
 		}
 
 		selectedPod, tbt, err := selector.SelectDecodePod(pods, metricsMap, 200*time.Millisecond, 500)
@@ -262,8 +262,8 @@ func TestSelectDecodePod(t *testing.T) {
 		p95_1 := 0.25 // Violates 200ms SLO with safety margin
 		p95_2 := 0.08
 		metricsMap := map[string]PodMetrics{
-			"10.0.0.1:8080": {P95TPOTSec: &p95_1, NumRunning: 8.0, GenTokPerS: 100.0, GPUCacheUsage: 95.0},
-			"10.0.0.2:8080": {P95TPOTSec: &p95_2, NumRunning: 2.0, GenTokPerS: 300.0, GPUCacheUsage: 60.0},
+			"default/pod-1": {P95TPOTSec: &p95_1, NumRunning: 8.0, GenTokPerS: 100.0, GPUCacheUsage: 95.0},
+			"default/pod-2": {P95TPOTSec: &p95_2, NumRunning: 2.0, GenTokPerS: 300.0, GPUCacheUsage: 60.0},
 		}
 
 		selectedPod, _, err := selector.SelectDecodePod(pods, metricsMap, 200*time.Millisecond, 500)
@@ -278,7 +278,7 @@ func TestSelectDecodePod(t *testing.T) {
 
 		p95 := 0.22 // Violates 200ms (180ms with safety), but meets 300ms relaxed
 		metricsMap := map[string]PodMetrics{
-			"10.0.0.1:8080": {P95TPOTSec: &p95, NumRunning: 3.0, GenTokPerS: 150.0, GPUCacheUsage: 70.0},
+			"default/pod-1": {P95TPOTSec: &p95, NumRunning: 3.0, GenTokPerS: 150.0, GPUCacheUsage: 70.0},
 		}
 
 		selectedPod, _, err := selector.SelectDecodePod(pods, metricsMap, 200*time.Millisecond, 500)
@@ -293,7 +293,7 @@ func TestSelectDecodePod(t *testing.T) {
 
 		p95 := 0.35 // Violates even relaxed SLO (300ms)
 		metricsMap := map[string]PodMetrics{
-			"10.0.0.1:8080": {P95TPOTSec: &p95, NumRunning: 10.0, GenTokPerS: 50.0, GPUCacheUsage: 98.0},
+			"default/pod-1": {P95TPOTSec: &p95, NumRunning: 10.0, GenTokPerS: 50.0, GPUCacheUsage: 98.0},
 		}
 
 		_, _, err := selector.SelectDecodePod(pods, metricsMap, 200*time.Millisecond, 500)

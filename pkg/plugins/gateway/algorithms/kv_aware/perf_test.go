@@ -344,24 +344,3 @@ func (m *mockBenchMetricsReader) BatchGetPodMetrics(pods []PodRef) map[string]Po
 	}
 	return result
 }
-
-// SimplePodList implements types.PodList for benchmarking
-type SimplePodList struct {
-	pods []*v1.Pod
-}
-
-func (p *SimplePodList) All() []*v1.Pod {
-	return p.pods
-}
-
-func (p *SimplePodList) Len() int {
-	return len(p.pods)
-}
-
-func (p *SimplePodList) Indexes() []string {
-	return []string{"default"}
-}
-
-func (p *SimplePodList) ListByIndex(index string) []*v1.Pod {
-	return p.pods
-}
