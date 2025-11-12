@@ -651,7 +651,6 @@ func (r *kvAwareRouter) computePrefixMatchesForRefs(
 }
 
 // selectBestPrefill selects the prefill pod with the lowest TTFT
-// Stub for Step 1, full implementation in Step 2
 func (r *kvAwareRouter) selectBestPrefill(evals []PrefillEval) *PrefillEval {
 	if len(evals) == 0 {
 		return nil
@@ -662,11 +661,21 @@ func (r *kvAwareRouter) selectBestPrefill(evals []PrefillEval) *PrefillEval {
 		return evals[i].TTFT < evals[j].TTFT
 	})
 
-	return &evals[0]
+	best := &evals[0]
+
+	// Log top candidates
+	if klog.V(4).Enabled() {
+		klog.V(4).Info("Top prefill candidates:")
+		for i := 0; i < len(evals) && i < 3; i++ {
+			klog.V(4).Infof("  [%d] %s: TTFT=%.2fs (local=%d blocks)",
+				i+1, evals[i].Pod.Name, evals[i].TTFT, evals[i].LocalPrefixBlk)
+		}
+	}
+
+	return best
 }
 
 // logPrefixMatchResults logs prefix matching results
-// Stub for Step 1, full implementation in Step 2
 func (r *kvAwareRouter) logPrefixMatchResults(requestID string, match *PrefixMatch, totalTokens int) {
 	if !klog.V(3).Enabled() {
 		return
@@ -675,25 +684,36 @@ func (r *kvAwareRouter) logPrefixMatchResults(requestID string, match *PrefixMat
 	blockSize := r.config.Models[0].BlockSizeTokens
 	totalBlocks := (totalTokens + blockSize - 1) / blockSize
 
-	klog.V(3).Infof("Prefix match for request %s: best=%s blocks=%d/%d",
-		requestID, match.BestPod, match.BestBlocks, totalBlocks)
+	klog.V(3).Infof("Prefix match for request %s:", requestID)
+	klog.V(3).Infof("  Total: %d tokens (%d blocks)", totalTokens, totalBlocks)
+	klog.V(3).Infof("  Best: %s with %d blocks", match.BestPod, match.BestBlocks)
+
+	if klog.V(4).Enabled() {
+		for pod, blocks := range match.PodPrefixBlocks {
+			hitRate := float64(blocks) / float64(totalBlocks) * 100
+			klog.V(4).Infof("    %s: %d blocks (%.1f%%)", pod, blocks, hitRate)
+		}
+	}
 }
 
 // logRoutingDecision logs detailed routing decision
-// Stub for Step 1, full implementation in Step 2
 func (r *kvAwareRouter) logRoutingDecision(decision *RoutingDecision) {
 	if !klog.V(2).Enabled() {
 		return
 	}
 
-	cacheHitRate := float64(decision.PrefixBlocks) / float64(decision.TotalBlocks) * 100
-	klog.V(2).Infof("Routing decision: prefill=%s decode=%s TTFT=%.2fs TBT=%.3fs cache=%.1f%%",
-		decision.PrefillPod.Name, decision.DecodePod.Name,
-		decision.EstimatedTTFT, decision.PredictedTBT, cacheHitRate)
+	klog.V(2).Infof("=== Routing Decision for %s ===", decision.RequestID)
+	klog.V(2).Infof("  Prefill: %s (TTFT: %.2fs)",
+		decision.PrefillPod.Name, decision.EstimatedTTFT)
+	klog.V(2).Infof("  Decode: %s (TBT: %.3fs)",
+		decision.DecodePod.Name, decision.PredictedTBT)
+	klog.V(2).Infof("  Cache hit: %d/%d blocks (%.1f%%)",
+		decision.PrefixBlocks, decision.TotalBlocks,
+		float64(decision.PrefixBlocks)/float64(decision.TotalBlocks)*100)
+	klog.V(2).Info("================================")
 }
 
 // getPodFromRef converts PodRef to Pod object
-// Stub for Step 1, full implementation in Step 2
 func (r *kvAwareRouter) getPodFromRef(ref PodRef) *v1.Pod {
 	return &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -724,7 +744,6 @@ func (r *kvAwareRouter) getPodAddressFromPod(pod *v1.Pod) string {
 }
 
 // RelaxSLO relaxes SLO by a multiplier
-// Stub for Step 1, full implementation in Step 2
 func RelaxSLO(slo time.Duration, multiplier float64) time.Duration {
 	return time.Duration(float64(slo) * multiplier)
 }
