@@ -1,0 +1,50 @@
+# AIBrix Configuration Example
+# This file provides example configuration for AIBrix routing algorithms
+
+# KV-aware routing configuration
+kv_aware:
+  enabled: false  # Disabled by default
+  enable_kv_transfer: false  # MVP: estimation only, no actual transfer
+
+  # Network settings (based on Mooncake paper recommendations)
+  transfer_bandwidth_bps: 1.25e10  # 100 Gbps = 12.5 GB/s
+  kv_copy_threshold_blocks: 2      # Min blocks difference to consider transfer
+
+  # SLO constraints
+  ttft_slo: 30s      # Time To First Token SLO
+  tbt_slo: 200ms     # Time Between Tokens SLO
+
+  # Metrics configuration
+  prom_enabled: true          # Enable Prometheus aggregations
+  metrics_window_size: 5m     # Window for metric aggregations
+
+  # Estimation parameters
+  ema_alpha: 0.7                    # EMA coefficient for calibration
+  queue_fallback_multiplier: 0.5    # Multiplier for queue fallback estimation
+
+  # Model specifications
+  models:
+    # LLaMA3-70B configuration
+    - model_name: "llama3-70b"
+      per_token_kv_bytes: 327680  # 320 KB per token
+      block_size_tokens: 16       # Must match AIBRIX_PREFIX_CACHE_BLOCK_SIZE
+
+    # LLaMA3-8B configuration
+    - model_name: "llama3-8b"
+      per_token_kv_bytes: 65536   # 64 KB per token
+      block_size_tokens: 16
+
+    # Deepseek configuration
+    - model_name: "deepseek-r1-distill-llama-8b"
+      per_token_kv_bytes: 32768   # 32 KB per token
+      block_size_tokens: 16
+
+    # Mixtral configuration
+    - model_name: "mixtral-8x7b"
+      per_token_kv_bytes: 131072  # 128 KB per token
+      block_size_tokens: 16
+
+    # Default configuration for unknown models
+    - model_name: "default"
+      per_token_kv_bytes: 32768   # 32 KB default
+      block_size_tokens: 16
