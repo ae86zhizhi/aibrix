@@ -18,6 +18,7 @@ package kvaware
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -395,5 +396,73 @@ func TestConstants(t *testing.T) {
 
 	t.Run("model label", func(t *testing.T) {
 		assert.Equal(t, "model.aibrix.ai/model-name", ModelLabelKey)
+	})
+}
+// Tests for Statistics (Phase 007)
+
+func TestStatistics_IncrementCounters(t *testing.T) {
+	stats := NewRoutingStatistics()
+
+	stats.IncrementTotal()
+	stats.IncrementSuccess()
+	stats.IncrementFallback("test_reason")
+	stats.IncrementRejection("slo_violation")
+	stats.IncrementError("no_pods")
+
+	snapshot := stats.(*routingStatistics).GetSnapshot()
+	assert.Equal(t, int64(1), snapshot.TotalRequests)
+	assert.Equal(t, int64(1), snapshot.SuccessfulRoutes)
+	assert.Equal(t, int64(1), snapshot.FallbackRoutes)
+	assert.Equal(t, int64(1), snapshot.RejectedRequests)
+	assert.Equal(t, int64(1), snapshot.Errors)
+}
+
+func TestStatistics_RecordMetrics(t *testing.T) {
+	stats := NewRoutingStatistics()
+
+	// Record some latencies
+	stats.RecordLatency(100 * time.Microsecond)
+	stats.RecordLatency(200 * time.Microsecond)
+	stats.RecordLatency(150 * time.Microsecond)
+
+	// Record cache hits
+	stats.RecordCacheHit(0.5)
+	stats.RecordCacheHit(0.7)
+	stats.RecordCacheHit(0.6)
+
+	snapshot := stats.(*routingStatistics).GetSnapshot()
+	assert.Greater(t, snapshot.AvgLatency, time.Duration(0))
+	assert.Greater(t, snapshot.P95Latency, time.Duration(0))
+	assert.Greater(t, snapshot.AvgCacheHitRate, 0.0)
+	assert.Less(t, snapshot.AvgCacheHitRate, 1.0)
+}
+
+func TestStatistics_Reset(t *testing.T) {
+	stats := NewRoutingStatistics().(*routingStatistics)
+
+	// Add some data
+	stats.IncrementTotal()
+	stats.IncrementSuccess()
+	stats.RecordLatency(100 * time.Microsecond)
+
+	// Reset
+	stats.Reset()
+
+	snapshot := stats.GetSnapshot()
+	assert.Equal(t, int64(0), snapshot.TotalRequests)
+	assert.Equal(t, int64(0), snapshot.SuccessfulRoutes)
+}
+
+func TestHelperMethods(t *testing.T) {
+	t.Run("extractIPFromIPPort", func(t *testing.T) {
+		assert.Equal(t, "10.0.1.1", extractIPFromIPPort("10.0.1.1:8080"))
+		assert.Equal(t, "192.168.1.1", extractIPFromIPPort("192.168.1.1:9000"))
+		assert.Equal(t, "invalid", extractIPFromIPPort("invalid"))
+	})
+
+	t.Run("RelaxSLO", func(t *testing.T) {
+		slo := 1 * time.Second
+		relaxed := RelaxSLO(slo, 1.5)
+		assert.Equal(t, 1500*time.Millisecond, relaxed)
 	})
 }
