@@ -18,6 +18,7 @@ package kvaware
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/vllm-project/aibrix/pkg/cache"
 	"github.com/vllm-project/aibrix/pkg/metrics"
@@ -56,6 +57,8 @@ type kvAwareRouter struct {
 	config        *KVAwareConfig
 	cache         cache.Cache
 	prefixIndexer *syncprefixcacheindexer.SyncPrefixHashTable
+	metricsReader MetricsReader
+	metricsCache  *metricsCache
 	fallbackAlgo  types.RoutingAlgorithm
 }
 
@@ -85,15 +88,25 @@ func NewKVAwareRouter() (types.Router, error) {
 	// In Phase 004, this will be used for prefix matching
 	indexer := syncprefixcacheindexer.NewSyncPrefixHashTable()
 
+	// Create metrics reader (Phase 003)
+	metricsReader := NewMetricsReader(c, config)
+
+	// Create metrics cache with 5 second TTL (Phase 003)
+	metricsCache := newMetricsCache(5 * time.Second)
+	metricsCache.startCleanupLoop(30 * time.Second)
+
 	router := &kvAwareRouter{
 		config:        config,
 		cache:         c,
 		prefixIndexer: indexer,
+		metricsReader: metricsReader,
+		metricsCache:  metricsCache,
 		fallbackAlgo:  routingalgorithms.RouterLeastRequest,
 	}
 
 	klog.V(2).Infof("KV-aware router initialized with config: TTFT SLO=%v, TBT SLO=%v, Bandwidth=%v Gbps",
 		config.TTFTSLO, config.TBTSLO, config.TransferBandwidthBps/1e9)
+	klog.V(2).Info("KV-aware router initialized with metrics reader and cache (TTL: 5s)")
 
 	return router, nil
 }
@@ -226,6 +239,26 @@ func (r *kvAwareRouter) convertPodsToPodRefs(pods []*v1.Pod, role string) []PodR
 		})
 	}
 	return refs
+}
+
+// getPodMetricsWithCache retrieves pod metrics with local caching
+func (r *kvAwareRouter) getPodMetricsWithCache(podRef PodRef) (PodMetrics, error) {
+	// Check cache first
+	if cached, ok := r.metricsCache.get(podRef.Key()); ok {
+		klog.V(5).Infof("Using cached metrics for %s", podRef.Name)
+		return cached, nil
+	}
+
+	// Fetch fresh metrics
+	metrics, err := r.metricsReader.GetPodMetrics(podRef)
+	if err != nil {
+		return metrics, err
+	}
+
+	// Cache the results
+	r.metricsCache.put(podRef.Key(), metrics)
+
+	return metrics, nil
 }
 
 // fallback uses the fallback algorithm when KV-aware routing cannot proceed
