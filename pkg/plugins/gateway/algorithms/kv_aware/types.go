@@ -127,7 +127,9 @@ type RoutingDecision struct {
 	EstimatedTTFT   float64        `json:"estimated_ttft"`
 	PredictedTBT    float64        `json:"predicted_tbt"`
 	PrefillEvals    []PrefillEval  `json:"prefill_evals"`
-	DecisionType    string         `json:"decision_type"` // "normal", "fallback", "rejected"
+	DecisionType    string         `json:"decision_type"` // "kv_aware", "fallback", "rejected"
+	PrefixBlocks    int            `json:"prefix_blocks"` // Number of cached prefix blocks
+	TotalBlocks     int            `json:"total_blocks"`  // Total prompt blocks
 	RejectionReason string         `json:"rejection_reason,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 }

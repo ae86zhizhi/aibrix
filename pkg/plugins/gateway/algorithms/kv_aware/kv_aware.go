@@ -18,6 +18,8 @@ package kvaware
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/vllm-project/aibrix/pkg/cache"
@@ -26,6 +28,7 @@ import (
 	"github.com/vllm-project/aibrix/pkg/types"
 	"github.com/vllm-project/aibrix/pkg/utils/syncprefixcacheindexer"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -52,6 +55,30 @@ func init() {
 	routingalgorithms.Register(RouterKVAware, NewKVAwareRouter)
 }
 
+// RoutingStatistics defines the interface for routing statistics tracking
+// Full implementation in statistics.go (Step 3)
+type RoutingStatistics interface {
+	IncrementTotal()
+	IncrementSuccess()
+	IncrementFallback(reason string)
+	IncrementRejection(reason string)
+	IncrementError(reason string)
+	RecordLatency(duration time.Duration)
+	RecordCacheHit(hitRate float64)
+}
+
+// noopStats is a temporary no-op implementation for statistics
+// Will be replaced with full implementation in Step 3
+type noopStats struct{}
+
+func (n *noopStats) IncrementTotal()                    {}
+func (n *noopStats) IncrementSuccess()                  {}
+func (n *noopStats) IncrementFallback(reason string)    {}
+func (n *noopStats) IncrementRejection(reason string)   {}
+func (n *noopStats) IncrementError(reason string)       {}
+func (n *noopStats) RecordLatency(duration time.Duration) {}
+func (n *noopStats) RecordCacheHit(hitRate float64)     {}
+
 // kvAwareRouter implements the KV-aware routing algorithm
 type kvAwareRouter struct {
 	config         *KVAwareConfig
@@ -64,6 +91,7 @@ type kvAwareRouter struct {
 	ttftEstimator  TTFTEstimator  // Phase 005: TTFT estimation
 	decodeSelector DecodeSelector // Phase 006: Decode selection
 	sloChecker     SLOChecker     // Phase 006: SLO checking
+	stats          RoutingStatistics // Phase 007: Statistics tracking (noop for now)
 	fallbackAlgo   types.RoutingAlgorithm
 }
 
@@ -125,6 +153,7 @@ func NewKVAwareRouter() (types.Router, error) {
 		ttftEstimator:  ttftEstimator,
 		decodeSelector: decodeSelector,
 		sloChecker:     sloChecker,
+		stats:          &noopStats{}, // Temporary noop, replaced in Step 4
 		fallbackAlgo:   routingalgorithms.RouterLeastRequest,
 	}
 
@@ -138,45 +167,156 @@ func NewKVAwareRouter() (types.Router, error) {
 	return router, nil
 }
 
-// Route selects a target pod based on KV-aware routing logic
+// Route implements the complete KV-aware routing algorithm (Phase 007)
 func (r *kvAwareRouter) Route(ctx *types.RoutingContext, readyPodList types.PodList) (string, error) {
-	// Get all ready pods
+	startTime := time.Now()
+	requestID := ctx.RequestID
+
+	// Track routing attempt
+	r.stats.IncrementTotal()
+
+	defer func() {
+		duration := time.Since(startTime)
+		r.stats.RecordLatency(duration)
+		klog.V(4).Infof("KV-aware routing took %v for request %s", duration, requestID)
+	}()
+
+	// Step 1: Get all ready pods
 	allPods := readyPodList.All()
 	if len(allPods) == 0 {
+		r.stats.IncrementError("no_pods")
 		return "", fmt.Errorf("no ready pods available")
 	}
 
-	// Separate prefill and decode pods by role label
+	// Step 2: Separate prefill and decode pods
 	prefillPods, decodePods, err := r.separatePrefillDecodePods(allPods)
 	if err != nil {
-		klog.V(3).Infof("Failed to separate P/D pods: %v, using fallback", err)
+		klog.Errorf("Failed to separate P/D pods: %v, falling back", err)
+		r.stats.IncrementFallback("pd_separation_failed")
 		return r.fallback(ctx, readyPodList)
 	}
 
 	// Check if we have both types of pods
-	if len(prefillPods) == 0 {
-		klog.V(3).Info("No prefill pods available, using fallback")
+	if len(prefillPods) == 0 || len(decodePods) == 0 {
+		klog.Warningf("Missing P/D pods (prefill=%d, decode=%d), falling back",
+			len(prefillPods), len(decodePods))
+		r.stats.IncrementFallback("missing_pd_pods")
 		return r.fallback(ctx, readyPodList)
 	}
-	if len(decodePods) == 0 {
-		klog.V(3).Info("No decode pods available, using fallback")
+
+	// Step 3: Convert to PodRefs
+	prefillRefs := r.convertPodsToPodRefs(prefillPods, RolePrefill)
+	decodeRefs := r.convertPodsToPodRefs(decodePods, RoleDecode)
+
+	// Step 4: Tokenize prompt
+	promptTokens, err := r.getPromptTokens(ctx)
+	if err != nil {
+		klog.Errorf("Failed to tokenize prompt: %v, falling back", err)
+		r.stats.IncrementFallback("tokenization_failed")
 		return r.fallback(ctx, readyPodList)
 	}
 
-	klog.V(4).Infof("Found %d prefill pods and %d decode pods", len(prefillPods), len(decodePods))
+	klog.V(4).Infof("Request %s: %d tokens, %d prefill pods, %d decode pods",
+		requestID, len(promptTokens), len(prefillRefs), len(decodeRefs))
 
-	// PLACEHOLDER: Phase 002 - Just select first prefill pod
-	// Full implementation will be done in Phase 005 (TTFT Estimation)
-	selectedPod := prefillPods[0]
-	podAddress := r.getPodAddress(selectedPod)
+	// Step 5: Compute prefix matches
+	prefixMatch, err := r.computePrefixMatchesForRefs(ctx, prefillRefs, promptTokens)
+	if err != nil {
+		klog.Errorf("Failed to compute prefix matches: %v, continuing without cache", err)
+		// Create empty prefix match as fallback
+		prefixMatch = &PrefixMatch{
+			PodPrefixBlocks: make(map[string]int),
+			BestBlocks:      0,
+		}
+	}
 
-	klog.V(3).Infof("Selected prefill pod: %s/%s (placeholder selection)",
-		selectedPod.Namespace, selectedPod.Name)
+	// Log prefix match results
+	r.logPrefixMatchResults(requestID, prefixMatch, len(promptTokens))
 
-	// Set target pod in context
-	ctx.SetTargetPod(selectedPod)
+	// Step 6: Get metrics for all pods
+	allRefs := append(prefillRefs, decodeRefs...)
+	metricsMap := r.metricsReader.BatchGetPodMetrics(allRefs)
 
-	return podAddress, nil
+	// Step 7: Evaluate all prefill pods
+	prefillEvals := r.ttftEstimator.EstimatePrefillPods(
+		prefillRefs, prefixMatch, metricsMap, promptTokens,
+	)
+
+	// Step 8: Select best prefill pod
+	bestPrefill := r.selectBestPrefill(prefillEvals)
+	if bestPrefill == nil {
+		klog.Error("No suitable prefill pod found")
+		r.stats.IncrementError("no_prefill_candidate")
+		return "", ErrNoPrefillCandidate
+	}
+
+	// Step 9: Check TTFT SLO
+	if r.config.TTFTSLO > 0 {
+		if err := r.sloChecker.CheckTTFTSLO(bestPrefill.TTFT, r.config.TTFTSLO); err != nil {
+			klog.Warningf("TTFT SLO violation for request %s: %v", requestID, err)
+			// Try relaxed SLO
+			relaxedSLO := RelaxSLO(r.config.TTFTSLO, 1.5)
+			if err := r.sloChecker.CheckTTFTSLO(bestPrefill.TTFT, relaxedSLO); err != nil {
+				r.stats.IncrementRejection("ttft_slo_violation")
+				return "", NewRejectionError(429, "Cannot meet TTFT SLO", "ttft_slo_violation", 5*time.Second)
+			}
+			klog.V(3).Infof("Request %s accepted with relaxed TTFT SLO", requestID)
+		}
+	}
+
+	// Step 10: Estimate output tokens for decode selection
+	outputTokens := estimateOutputTokens(len(promptTokens))
+
+	// Step 11: Select decode pod
+	decodePod, predictedTBT, err := r.decodeSelector.SelectDecodePod(
+		decodeRefs, metricsMap, r.config.TBTSLO, outputTokens,
+	)
+	if err != nil {
+		klog.Errorf("Failed to select decode pod: %v", err)
+		r.stats.IncrementError("no_decode_candidate")
+		return "", err
+	}
+
+	// Step 12: Final SLO check
+	if r.sloChecker.ShouldReject(bestPrefill.TTFT, predictedTBT,
+		r.config.TTFTSLO, r.config.TBTSLO) {
+		klog.Warningf("Request %s rejected due to SLO violation", requestID)
+		r.stats.IncrementRejection("combined_slo_violation")
+		return "", NewRejectionError(429, "Cannot meet SLO", "cannot_meet_slo", 5*time.Second)
+	}
+
+	// Step 13: Create routing decision
+	decision := &RoutingDecision{
+		RequestID:     requestID,
+		Timestamp:     time.Now(),
+		PrefillPod:    &bestPrefill.Pod,
+		DecodePod:     decodePod,
+		EstimatedTTFT: bestPrefill.TTFT,
+		PredictedTBT:  predictedTBT,
+		PrefillEvals:  prefillEvals,
+		DecisionType:  "kv_aware",
+		PrefixBlocks:  bestPrefill.LocalPrefixBlk,
+		TotalBlocks:   (len(promptTokens) + r.config.Models[0].BlockSizeTokens - 1) / r.config.Models[0].BlockSizeTokens,
+	}
+
+	// Log routing decision
+	r.logRoutingDecision(decision)
+
+	// Track successful routing
+	r.stats.IncrementSuccess()
+	r.stats.RecordCacheHit(float64(decision.PrefixBlocks) / float64(decision.TotalBlocks))
+
+	// Set target pod and return address
+	// For MVP, route to prefill pod (in future, could route to both)
+	targetPod := r.getPodFromRef(bestPrefill.Pod)
+	ctx.SetTargetPod(targetPod)
+
+	targetAddr := r.getPodAddressFromPod(targetPod)
+
+	klog.V(2).Infof("Routed request %s to prefill pod %s (TTFT: %.2fs, TBT: %.3fs)",
+		requestID, bestPrefill.Pod.Name, bestPrefill.TTFT, predictedTBT)
+
+	return targetAddr, nil
 }
 
 // SubscribedMetrics returns the list of metrics this router needs
@@ -464,4 +604,127 @@ func estimateOutputTokens(promptLength int) int {
 	}
 
 	return estimated
+}
+
+// getPromptTokens extracts and tokenizes the prompt from routing context
+func (r *kvAwareRouter) getPromptTokens(ctx *types.RoutingContext) ([]int, error) {
+	return ctx.PromptTokens()
+}
+
+// computePrefixMatchesForRefs adapts the existing computePrefixMatches to work with PodRefs
+func (r *kvAwareRouter) computePrefixMatchesForRefs(
+	ctx *types.RoutingContext,
+	readyPods []PodRef,
+	tokens []int,
+) (*PrefixMatch, error) {
+	// Extract LoRA ID from request headers
+	loraID := r.extractLoraID(ctx)
+
+	// Get model name from context
+	modelName := ctx.Model
+	if modelName == "" && len(r.config.Models) > 0 {
+		modelName = r.config.Models[0].ModelName
+	}
+
+	// Get block size from model spec
+	blockSize := r.config.Models[0].BlockSizeTokens // Default from first model
+	for _, modelSpec := range r.config.Models {
+		if modelSpec.ModelName == modelName {
+			blockSize = modelSpec.BlockSizeTokens
+			break
+		}
+	}
+
+	// Compute prefix matches
+	prefixMatch, err := r.prefixMatcher.ComputePrefixMatch(
+		modelName,
+		loraID,
+		tokens,
+		readyPods,
+		blockSize,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("prefix match computation failed: %w", err)
+	}
+
+	return &prefixMatch, nil
+}
+
+// selectBestPrefill selects the prefill pod with the lowest TTFT
+// Stub for Step 1, full implementation in Step 2
+func (r *kvAwareRouter) selectBestPrefill(evals []PrefillEval) *PrefillEval {
+	if len(evals) == 0 {
+		return nil
+	}
+
+	// Sort by TTFT (ascending)
+	sort.Slice(evals, func(i, j int) bool {
+		return evals[i].TTFT < evals[j].TTFT
+	})
+
+	return &evals[0]
+}
+
+// logPrefixMatchResults logs prefix matching results
+// Stub for Step 1, full implementation in Step 2
+func (r *kvAwareRouter) logPrefixMatchResults(requestID string, match *PrefixMatch, totalTokens int) {
+	if !klog.V(3).Enabled() {
+		return
+	}
+
+	blockSize := r.config.Models[0].BlockSizeTokens
+	totalBlocks := (totalTokens + blockSize - 1) / blockSize
+
+	klog.V(3).Infof("Prefix match for request %s: best=%s blocks=%d/%d",
+		requestID, match.BestPod, match.BestBlocks, totalBlocks)
+}
+
+// logRoutingDecision logs detailed routing decision
+// Stub for Step 1, full implementation in Step 2
+func (r *kvAwareRouter) logRoutingDecision(decision *RoutingDecision) {
+	if !klog.V(2).Enabled() {
+		return
+	}
+
+	cacheHitRate := float64(decision.PrefixBlocks) / float64(decision.TotalBlocks) * 100
+	klog.V(2).Infof("Routing decision: prefill=%s decode=%s TTFT=%.2fs TBT=%.3fs cache=%.1f%%",
+		decision.PrefillPod.Name, decision.DecodePod.Name,
+		decision.EstimatedTTFT, decision.PredictedTBT, cacheHitRate)
+}
+
+// getPodFromRef converts PodRef to Pod object
+// Stub for Step 1, full implementation in Step 2
+func (r *kvAwareRouter) getPodFromRef(ref PodRef) *v1.Pod {
+	return &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ref.Name,
+			Namespace: ref.Namespace,
+		},
+		Status: v1.PodStatus{
+			PodIP: extractIPFromIPPort(ref.IPPort),
+		},
+	}
+}
+
+// extractIPFromIPPort extracts IP from "IP:port" format
+func extractIPFromIPPort(ipPort string) string {
+	if idx := strings.LastIndex(ipPort, ":"); idx > 0 {
+		return ipPort[:idx]
+	}
+	return ipPort
+}
+
+// getPodAddressFromPod returns the address to route to (renamed from existing getPodAddress)
+func (r *kvAwareRouter) getPodAddressFromPod(pod *v1.Pod) string {
+	if pod.Status.PodIP == "" {
+		return ""
+	}
+	// Default to port 8000 (vLLM default)
+	return fmt.Sprintf("%s:8000", pod.Status.PodIP)
+}
+
+// RelaxSLO relaxes SLO by a multiplier
+// Stub for Step 1, full implementation in Step 2
+func RelaxSLO(slo time.Duration, multiplier float64) time.Duration {
+	return time.Duration(float64(slo) * multiplier)
 }
