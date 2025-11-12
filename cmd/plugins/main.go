@@ -35,6 +35,7 @@ import (
 	"github.com/vllm-project/aibrix/pkg/cache"
 	"github.com/vllm-project/aibrix/pkg/plugins/gateway"
 	routing "github.com/vllm-project/aibrix/pkg/plugins/gateway/algorithms"
+	_ "github.com/vllm-project/aibrix/pkg/plugins/gateway/algorithms/kv_aware"
 	"github.com/vllm-project/aibrix/pkg/utils"
 	"google.golang.org/grpc/health"
 	healthPb "google.golang.org/grpc/health/grpc_health_v1"
