@@ -56,7 +56,7 @@ func init() {
 }
 
 // RoutingStatistics defines the interface for routing statistics tracking
-// Full implementation in statistics.go (Step 3)
+// Implementation in statistics.go
 type RoutingStatistics interface {
 	IncrementTotal()
 	IncrementSuccess()
@@ -66,18 +66,6 @@ type RoutingStatistics interface {
 	RecordLatency(duration time.Duration)
 	RecordCacheHit(hitRate float64)
 }
-
-// noopStats is a temporary no-op implementation for statistics
-// Will be replaced with full implementation in Step 3
-type noopStats struct{}
-
-func (n *noopStats) IncrementTotal()                    {}
-func (n *noopStats) IncrementSuccess()                  {}
-func (n *noopStats) IncrementFallback(reason string)    {}
-func (n *noopStats) IncrementRejection(reason string)   {}
-func (n *noopStats) IncrementError(reason string)       {}
-func (n *noopStats) RecordLatency(duration time.Duration) {}
-func (n *noopStats) RecordCacheHit(hitRate float64)     {}
 
 // kvAwareRouter implements the KV-aware routing algorithm
 type kvAwareRouter struct {
@@ -142,6 +130,9 @@ func NewKVAwareRouter() (types.Router, error) {
 	// Create SLO checker (Phase 006)
 	sloChecker := NewSLOChecker()
 
+	// Create statistics tracker (Phase 007)
+	stats := NewRoutingStatistics()
+
 	router := &kvAwareRouter{
 		config:         config,
 		cache:          c,
@@ -153,7 +144,7 @@ func NewKVAwareRouter() (types.Router, error) {
 		ttftEstimator:  ttftEstimator,
 		decodeSelector: decodeSelector,
 		sloChecker:     sloChecker,
-		stats:          &noopStats{}, // Temporary noop, replaced in Step 4
+		stats:          stats,
 		fallbackAlgo:   routingalgorithms.RouterLeastRequest,
 	}
 
@@ -163,6 +154,7 @@ func NewKVAwareRouter() (types.Router, error) {
 	klog.V(2).Info("KV-aware router initialized with prefix matcher and tokenizer (Phase 004)")
 	klog.V(2).Info("KV-aware router initialized with TTFT estimator (Phase 005)")
 	klog.V(2).Info("KV-aware router initialized with decode selector and SLO checker (Phase 006)")
+	klog.V(2).Info("KV-aware router initialized with statistics tracking (Phase 007)")
 
 	return router, nil
 }
