@@ -57,8 +57,11 @@ type kvAwareRouter struct {
 	config        *KVAwareConfig
 	cache         cache.Cache
 	prefixIndexer *syncprefixcacheindexer.SyncPrefixHashTable
+	prefixMatcher PrefixMatcher
+	tokenizer     Tokenizer
 	metricsReader MetricsReader
 	metricsCache  *metricsCache
+	ttftEstimator TTFTEstimator // Phase 005: TTFT estimation
 	fallbackAlgo  types.RoutingAlgorithm
 }
 
@@ -84,9 +87,14 @@ func NewKVAwareRouter() (types.Router, error) {
 		return nil, fmt.Errorf("failed to get cache: %w", err)
 	}
 
-	// Create prefix indexer instance for Phase 004 (not used in Phase 002)
-	// In Phase 004, this will be used for prefix matching
+	// Create prefix indexer instance (Phase 004)
 	indexer := syncprefixcacheindexer.NewSyncPrefixHashTable()
+
+	// Create tokenizer (Phase 004)
+	tokenizer := NewTokenizer()
+
+	// Create prefix matcher (Phase 004)
+	prefixMatcher := NewPrefixMatcher(indexer, tokenizer)
 
 	// Create metrics reader (Phase 003)
 	metricsReader := NewMetricsReader(c, config)
@@ -95,18 +103,26 @@ func NewKVAwareRouter() (types.Router, error) {
 	metricsCache := newMetricsCache(5 * time.Second)
 	metricsCache.startCleanupLoop(30 * time.Second)
 
+	// Create TTFT estimator (Phase 005)
+	ttftEstimator := NewTTFTEstimator(config)
+
 	router := &kvAwareRouter{
 		config:        config,
 		cache:         c,
 		prefixIndexer: indexer,
+		prefixMatcher: prefixMatcher,
+		tokenizer:     tokenizer,
 		metricsReader: metricsReader,
 		metricsCache:  metricsCache,
+		ttftEstimator: ttftEstimator,
 		fallbackAlgo:  routingalgorithms.RouterLeastRequest,
 	}
 
 	klog.V(2).Infof("KV-aware router initialized with config: TTFT SLO=%v, TBT SLO=%v, Bandwidth=%v Gbps",
 		config.TTFTSLO, config.TBTSLO, config.TransferBandwidthBps/1e9)
 	klog.V(2).Info("KV-aware router initialized with metrics reader and cache (TTL: 5s)")
+	klog.V(2).Info("KV-aware router initialized with prefix matcher and tokenizer (Phase 004)")
+	klog.V(2).Info("KV-aware router initialized with TTFT estimator (Phase 005)")
 
 	return router, nil
 }
@@ -261,6 +277,82 @@ func (r *kvAwareRouter) getPodMetricsWithCache(podRef PodRef) (PodMetrics, error
 	return metrics, nil
 }
 
+// computePrefixMatches uses the prefix matcher to compute prefix matches for ready pods
+func (r *kvAwareRouter) computePrefixMatches(
+	ctx *types.RoutingContext,
+	prompt string,
+	modelName string,
+	readyPods []PodRef,
+) (PrefixMatch, error) {
+	// Extract LoRA ID from request headers
+	loraID := r.extractLoraID(ctx)
+
+	// Tokenize the prompt
+	tokens, err := r.tokenizer.Tokenize(prompt, modelName)
+	if err != nil {
+		klog.Errorf("Failed to tokenize prompt for model %s: %v", modelName, err)
+		return PrefixMatch{}, fmt.Errorf("tokenization failed: %w", err)
+	}
+
+	// Get block size from model spec
+	blockSize := r.config.Models[0].BlockSizeTokens // Default from first model
+	for _, modelSpec := range r.config.Models {
+		if modelSpec.ModelName == modelName {
+			blockSize = modelSpec.BlockSizeTokens
+			break
+		}
+	}
+
+	// Compute prefix matches
+	prefixMatch, err := r.prefixMatcher.ComputePrefixMatch(
+		modelName,
+		loraID,
+		tokens,
+		readyPods,
+		blockSize,
+	)
+	if err != nil {
+		klog.Errorf("Failed to compute prefix match: %v", err)
+		return PrefixMatch{}, fmt.Errorf("prefix match computation failed: %w", err)
+	}
+
+	klog.V(4).Infof("Computed prefix match: best=%s blocks=%d total_matches=%d",
+		prefixMatch.BestPod, prefixMatch.BestBlocks, len(prefixMatch.PodPrefixBlocks))
+
+	return prefixMatch, nil
+}
+
+// extractLoraID extracts LoRA ID from request headers
+// Returns -1 if no LoRA adapter is specified (representing no LoRA)
+func (r *kvAwareRouter) extractLoraID(ctx *types.RoutingContext) int64 {
+	// Check for LoRA ID in request headers
+	// Common header names: X-LoRA-ID, X-Lora-Adapter-Id
+	headers := ctx.ReqHeaders
+	if headers != nil {
+		// Try X-LoRA-ID header first
+		if loraIDStr, exists := headers["X-LoRA-ID"]; exists && loraIDStr != "" {
+			var loraID int64
+			if _, err := fmt.Sscanf(loraIDStr, "%d", &loraID); err == nil {
+				klog.V(5).Infof("Extracted LoRA ID from X-LoRA-ID header: %d", loraID)
+				return loraID
+			}
+		}
+
+		// Try X-Lora-Adapter-Id header
+		if loraIDStr, exists := headers["X-Lora-Adapter-Id"]; exists && loraIDStr != "" {
+			var loraID int64
+			if _, err := fmt.Sscanf(loraIDStr, "%d", &loraID); err == nil {
+				klog.V(5).Infof("Extracted LoRA ID from X-Lora-Adapter-Id header: %d", loraID)
+				return loraID
+			}
+		}
+	}
+
+	// No LoRA adapter specified
+	klog.V(5).Info("No LoRA ID found in headers, using -1 (no LoRA)")
+	return -1
+}
+
 // fallback uses the fallback algorithm when KV-aware routing cannot proceed
 func (r *kvAwareRouter) fallback(ctx *types.RoutingContext, readyPodList types.PodList) (string, error) {
 	klog.V(3).Infof("KV-aware routing falling back to %s algorithm", r.fallbackAlgo)
@@ -273,4 +365,76 @@ func (r *kvAwareRouter) fallback(ctx *types.RoutingContext, readyPodList types.P
 
 	// Use fallback router
 	return fallbackRouter.Route(ctx, readyPodList)
+}
+
+// evaluatePrefillCandidates evaluates all prefill pods and returns TTFT estimates (Phase 005)
+func (r *kvAwareRouter) evaluatePrefillCandidates(
+	ctx *types.RoutingContext,
+	prefillPods []PodRef,
+	prefixMatch PrefixMatch,
+	promptTokens []int,
+) ([]PrefillEval, error) {
+	if len(prefillPods) == 0 {
+		return nil, fmt.Errorf("no prefill pods available")
+	}
+
+	klog.V(4).Infof("Evaluating %d prefill pod candidates", len(prefillPods))
+
+	// 1. Batch fetch metrics for all prefill pods
+	metricsMap := r.metricsReader.BatchGetPodMetrics(prefillPods)
+
+	// 2. Estimate TTFT for all pods concurrently
+	evals := r.ttftEstimator.EstimatePrefillPods(
+		prefillPods,
+		&prefixMatch,
+		metricsMap,
+		promptTokens,
+	)
+
+	// 3. Filter out pods that exceed TTFT SLO (if configured)
+	if r.config.TTFTSLO > 0 {
+		filteredEvals := make([]PrefillEval, 0, len(evals))
+		for _, eval := range evals {
+			if eval.TTFT <= r.config.TTFTSLO.Seconds() {
+				filteredEvals = append(filteredEvals, eval)
+			} else {
+				klog.V(4).Infof("Pod %s exceeds TTFT SLO: %.2fs > %.2fs",
+					eval.Pod.Name, eval.TTFT, r.config.TTFTSLO.Seconds())
+			}
+		}
+		evals = filteredEvals
+	}
+
+	if len(evals) == 0 {
+		return nil, fmt.Errorf("no prefill pods meet TTFT SLO requirements")
+	}
+
+	return evals, nil
+}
+
+// selectBestPrefillPod selects the prefill pod with minimum TTFT (Phase 005)
+func (r *kvAwareRouter) selectBestPrefillPod(
+	evals []PrefillEval,
+) (*PodRef, error) {
+	if len(evals) == 0 {
+		return nil, fmt.Errorf("no prefill pods meet TTFT SLO")
+	}
+
+	// Find pod with minimum TTFT
+	bestIdx := 0
+	for i := 1; i < len(evals); i++ {
+		if evals[i].TTFT < evals[bestIdx].TTFT {
+			bestIdx = i
+		} else if evals[i].TTFT == evals[bestIdx].TTFT {
+			// Tie-breaker: prefer pod with more cached blocks
+			if evals[i].LocalPrefixBlk > evals[bestIdx].LocalPrefixBlk {
+				bestIdx = i
+			}
+		}
+	}
+
+	klog.V(3).Infof("Selected prefill pod %s with TTFT=%.2fs (from %d candidates)",
+		evals[bestIdx].Pod.Name, evals[bestIdx].TTFT, len(evals))
+
+	return &evals[bestIdx].Pod, nil
 }
