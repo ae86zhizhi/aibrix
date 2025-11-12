@@ -156,6 +156,9 @@ func NewKVAwareRouter() (types.Router, error) {
 	klog.V(2).Info("KV-aware router initialized with decode selector and SLO checker (Phase 006)")
 	klog.V(2).Info("KV-aware router initialized with statistics tracking (Phase 007)")
 
+	// Start statistics reporting (Phase 007)
+	router.startStatsReporting(30 * time.Second)
+
 	return router, nil
 }
 
@@ -738,4 +741,63 @@ func (r *kvAwareRouter) getPodAddressFromPod(pod *v1.Pod) string {
 // RelaxSLO relaxes SLO by a multiplier
 func RelaxSLO(slo time.Duration, multiplier float64) time.Duration {
 	return time.Duration(float64(slo) * multiplier)
+}
+
+// startStatsReporting starts periodic statistics reporting (Phase 007)
+func (r *kvAwareRouter) startStatsReporting(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			snapshot := r.stats.(*routingStatistics).GetSnapshot()
+
+			if snapshot.TotalRequests > 0 {
+				klog.V(2).Infof("KV-aware routing stats: total=%d, success=%.1f%%, fallback=%.1f%%, reject=%.1f%%, error=%.1f%%",
+					snapshot.TotalRequests,
+					snapshot.SuccessRate*100,
+					snapshot.FallbackRate*100,
+					snapshot.RejectionRate*100,
+					snapshot.ErrorRate*100)
+
+				klog.V(3).Infof("  Latency: avg=%v, p95=%v", snapshot.AvgLatency, snapshot.P95Latency)
+				klog.V(3).Infof("  Cache hit rate: avg=%.1f%%", snapshot.AvgCacheHitRate*100)
+
+				// Log top reasons if present
+				if len(snapshot.TopFallbackReasons) > 0 {
+					klog.V(4).Infof("  Top fallback reasons: %v", snapshot.TopFallbackReasons)
+				}
+				if len(snapshot.TopRejectionReasons) > 0 {
+					klog.V(4).Infof("  Top rejection reasons: %v", snapshot.TopRejectionReasons)
+				}
+				if len(snapshot.TopErrorTypes) > 0 {
+					klog.V(4).Infof("  Top error types: %v", snapshot.TopErrorTypes)
+				}
+			}
+
+			// Export to Prometheus if configured
+			if r.config.PromEnabled {
+				r.exportStatsToPrometheus(snapshot)
+			}
+		}
+	}()
+
+	klog.V(2).Infof("Started statistics reporting with interval %v", interval)
+}
+
+// exportStatsToPrometheus exports statistics to Prometheus (Phase 007)
+// TODO: Implement Prometheus metrics export using prometheus client library
+func (r *kvAwareRouter) exportStatsToPrometheus(snapshot StatsSnapshot) {
+	// Future implementation will use prometheus client library to set gauges/counters
+	// Example metrics to export:
+	// - kv_aware_routing_total_requests
+	// - kv_aware_routing_success_rate
+	// - kv_aware_routing_fallback_rate
+	// - kv_aware_routing_rejection_rate
+	// - kv_aware_routing_error_rate
+	// - kv_aware_routing_latency_avg
+	// - kv_aware_routing_latency_p95
+	// - kv_aware_routing_cache_hit_rate
+	klog.V(5).Infof("Exporting stats to Prometheus: total=%d, success_rate=%.2f, cache_hit=%.2f",
+		snapshot.TotalRequests, snapshot.SuccessRate, snapshot.AvgCacheHitRate)
 }
