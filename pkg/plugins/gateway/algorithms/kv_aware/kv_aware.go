@@ -54,15 +54,17 @@ func init() {
 
 // kvAwareRouter implements the KV-aware routing algorithm
 type kvAwareRouter struct {
-	config        *KVAwareConfig
-	cache         cache.Cache
-	prefixIndexer *syncprefixcacheindexer.SyncPrefixHashTable
-	prefixMatcher PrefixMatcher
-	tokenizer     Tokenizer
-	metricsReader MetricsReader
-	metricsCache  *metricsCache
-	ttftEstimator TTFTEstimator // Phase 005: TTFT estimation
-	fallbackAlgo  types.RoutingAlgorithm
+	config         *KVAwareConfig
+	cache          cache.Cache
+	prefixIndexer  *syncprefixcacheindexer.SyncPrefixHashTable
+	prefixMatcher  PrefixMatcher
+	tokenizer      Tokenizer
+	metricsReader  MetricsReader
+	metricsCache   *metricsCache
+	ttftEstimator  TTFTEstimator  // Phase 005: TTFT estimation
+	decodeSelector DecodeSelector // Phase 006: Decode selection
+	sloChecker     SLOChecker     // Phase 006: SLO checking
+	fallbackAlgo   types.RoutingAlgorithm
 }
 
 // NewKVAwareRouter creates a new KV-aware router instance
@@ -106,16 +108,24 @@ func NewKVAwareRouter() (types.Router, error) {
 	// Create TTFT estimator (Phase 005)
 	ttftEstimator := NewTTFTEstimator(config)
 
+	// Create decode selector (Phase 006)
+	decodeSelector := NewDecodeSelector(config)
+
+	// Create SLO checker (Phase 006)
+	sloChecker := NewSLOChecker()
+
 	router := &kvAwareRouter{
-		config:        config,
-		cache:         c,
-		prefixIndexer: indexer,
-		prefixMatcher: prefixMatcher,
-		tokenizer:     tokenizer,
-		metricsReader: metricsReader,
-		metricsCache:  metricsCache,
-		ttftEstimator: ttftEstimator,
-		fallbackAlgo:  routingalgorithms.RouterLeastRequest,
+		config:         config,
+		cache:          c,
+		prefixIndexer:  indexer,
+		prefixMatcher:  prefixMatcher,
+		tokenizer:      tokenizer,
+		metricsReader:  metricsReader,
+		metricsCache:   metricsCache,
+		ttftEstimator:  ttftEstimator,
+		decodeSelector: decodeSelector,
+		sloChecker:     sloChecker,
+		fallbackAlgo:   routingalgorithms.RouterLeastRequest,
 	}
 
 	klog.V(2).Infof("KV-aware router initialized with config: TTFT SLO=%v, TBT SLO=%v, Bandwidth=%v Gbps",
@@ -123,6 +133,7 @@ func NewKVAwareRouter() (types.Router, error) {
 	klog.V(2).Info("KV-aware router initialized with metrics reader and cache (TTL: 5s)")
 	klog.V(2).Info("KV-aware router initialized with prefix matcher and tokenizer (Phase 004)")
 	klog.V(2).Info("KV-aware router initialized with TTFT estimator (Phase 005)")
+	klog.V(2).Info("KV-aware router initialized with decode selector and SLO checker (Phase 006)")
 
 	return router, nil
 }
@@ -437,4 +448,20 @@ func (r *kvAwareRouter) selectBestPrefillPod(
 		evals[bestIdx].Pod.Name, evals[bestIdx].TTFT, len(evals))
 
 	return &evals[bestIdx].Pod, nil
+}
+
+// estimateOutputTokens estimates the number of output tokens for a request (Phase 006)
+func estimateOutputTokens(promptLength int) int {
+	// Simple heuristic: output is typically 0.5x to 2x input length
+	// Use 1x as default estimate
+	estimated := promptLength
+
+	// Apply reasonable bounds
+	if estimated < 10 {
+		estimated = 10 // Minimum 10 tokens
+	} else if estimated > 2048 {
+		estimated = 2048 // Maximum 2048 tokens for estimation
+	}
+
+	return estimated
 }
