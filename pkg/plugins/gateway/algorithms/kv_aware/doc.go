@@ -76,19 +76,19 @@ See config.go for full configuration options.
 
 The router implements a 13-step algorithm:
 
-	1. Get all ready pods
-	2. Separate prefill and decode pods by role label
-	3. Convert to internal PodRef structures
-	4. Tokenize the request prompt
-	5. Compute prefix cache matches across prefill pods
-	6. Fetch metrics for all pods
-	7. Estimate TTFT for each prefill pod
-	8. Select prefill pod with minimum TTFT
-	9. Check TTFT against SLO (with relaxed fallback)
-	10. Estimate output tokens for decode selection
-	11. Select decode pod optimizing for TBT
-	12. Final combined SLO check
-	13. Return routing decision
+ 1. Get all ready pods
+ 2. Separate prefill and decode pods by role label
+ 3. Convert to internal PodRef structures
+ 4. Tokenize the request prompt
+ 5. Compute prefix cache matches across prefill pods
+ 6. Fetch metrics for all pods
+ 7. Estimate TTFT for each prefill pod
+ 8. Select prefill pod with minimum TTFT
+ 9. Check TTFT against SLO (with relaxed fallback)
+ 10. Estimate output tokens for decode selection
+ 11. Select decode pod optimizing for TBT
+ 12. Final combined SLO check
+ 13. Return routing decision
 
 # Monitoring
 

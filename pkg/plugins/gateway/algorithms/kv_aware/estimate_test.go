@@ -28,7 +28,7 @@ import (
 func createTestConfig() *KVAwareConfig {
 	return &KVAwareConfig{
 		Enabled:                 true,
-		EnableKVTransfer:        false, // MVP: no actual transfer
+		EnableKVTransfer:        false,     // MVP: no actual transfer
 		TransferBandwidthBps:    100e9 / 8, // 100 Gbps = 12.5 GB/s
 		KVCopyThresholdBlk:      4,
 		QueueFallbackMultiplier: 0.8,
@@ -135,73 +135,99 @@ func TestEstimateQueueTime(t *testing.T) {
 		assert.Equal(t, 0.0, result, "Should return 0 when no waiting requests")
 	})
 
-	t.Run("service rate method", func(t *testing.T) {
-		meanPrefill := 2.0
+	// Phase 008: P95 from histogram is now PREFERRED over service rate
+	t.Run("Method A - P95 from histogram", func(t *testing.T) {
+		p95Queue := 2.5
 		metrics := PodMetrics{
-			NumWaiting:     10,
-			MeanPrefillSec: &meanPrefill,
+			NumWaiting:  10,
+			P95QueueSec: &p95Queue,
 		}
 
-		// Service rate = 1/2.0 = 0.5 req/s
-		// Queue time = 10 / 0.5 = 20s
-		// With dampening (0.8): 20 * 0.8 = 16s
+		// Should use P95 directly (Method A)
 		result := estimator.estimateQueueTime(metrics)
-
-		assert.InDelta(t, 16.0, result, 0.1, "Queue time using service rate")
+		assert.Equal(t, 2.5, result, "Should use P95 directly")
 	})
 
-	t.Run("P95 queue time method", func(t *testing.T) {
-		p95Queue := 5.5
+	t.Run("Method A - P95 with scaling", func(t *testing.T) {
+		p95Queue := 2.0
+		avgWaiting := 5.0
 		metrics := PodMetrics{
-			NumWaiting:   10,
-			P95QueueSec:  &p95Queue,
-			// MeanPrefillSec is nil, so should use P95
+			NumWaiting:    10, // Current queue 2x average
+			P95QueueSec:   &p95Queue,
+			AvgNumWaiting: &avgWaiting,
 		}
 
+		// ratio = 10/5 = 2, scale = 2^0.7 ≈ 1.62
+		// result = 2.0 * 1.62 ≈ 3.25
 		result := estimator.estimateQueueTime(metrics)
-		assert.Equal(t, 5.5, result, "Should use P95 queue time")
+		assert.InDelta(t, 3.25, result, 0.1, "Should scale P95 by queue ratio")
 	})
 
-	t.Run("service rate preferred over P95", func(t *testing.T) {
-		meanPrefill := 1.0
+	// Phase 008: P95 is now preferred, so this test validates P95 takes precedence
+	t.Run("P95 preferred over Lambda", func(t *testing.T) {
 		p95Queue := 10.0
+		lambda := 2.0
 		metrics := PodMetrics{
-			NumWaiting:     5,
-			MeanPrefillSec: &meanPrefill,
-			P95QueueSec:    &p95Queue,
+			NumWaiting:    5,
+			P95QueueSec:   &p95Queue,
+			LambdaReqPerS: &lambda,
 		}
 
-		// Service rate = 1/1.0 = 1.0 req/s
-		// Queue time = 5 / 1.0 = 5s
-		// With dampening (0.8): 5 * 0.8 = 4s
+		// P95 is preferred (Method A), should return 10.0
 		result := estimator.estimateQueueTime(metrics)
-
-		assert.InDelta(t, 4.0, result, 0.1, "Should use service rate over P95")
+		assert.Equal(t, 10.0, result, "Should use P95 over Lambda")
 	})
 
-	t.Run("fallback heuristic", func(t *testing.T) {
+	t.Run("Method B - Little's Law with Lambda", func(t *testing.T) {
+		lambda := 2.0 // 2 req/s
+		metrics := PodMetrics{
+			NumWaiting:    10,
+			LambdaReqPerS: &lambda,
+			// No P95QueueSec, falls to Method B
+		}
+
+		// W_mean = L/λ = 10/2 = 5, factor = 1.5 (default)
+		// result = 5 * 1.5 = 7.5
+		result := estimator.estimateQueueTime(metrics)
+		assert.InDelta(t, 7.5, result, 0.1, "Should use Little's Law with Lambda")
+	})
+
+	t.Run("Method C - fallback heuristic", func(t *testing.T) {
 		metrics := PodMetrics{
 			NumWaiting: 8,
-			// No MeanPrefillSec, no P95QueueSec
+			// No P95QueueSec, no LambdaReqPerS
 		}
 
-		// Fallback: 8 * 0.5 = 4s
+		// Fallback: 8 * 0.5 = 4s (default basePerReq)
 		result := estimator.estimateQueueTime(metrics)
 		assert.Equal(t, 4.0, result, "Should use fallback heuristic")
 	})
 
-	t.Run("zero service rate", func(t *testing.T) {
-		meanPrefill := 0.0
-		p95Queue := 3.0
+	t.Run("Method C - fallback with MeanPrefillSec", func(t *testing.T) {
+		meanPrefill := 0.8
 		metrics := PodMetrics{
-			NumWaiting:     5,
+			NumWaiting:     4,
 			MeanPrefillSec: &meanPrefill,
-			P95QueueSec:    &p95Queue,
+			// No P95QueueSec, no LambdaReqPerS
 		}
 
-		// Service rate = 0, should fall back to P95
+		// Uses MeanPrefillSec as basePerReq: 4 * 0.8 = 3.2s
 		result := estimator.estimateQueueTime(metrics)
-		assert.Equal(t, 3.0, result, "Should fall back to P95 when service rate is 0")
+		assert.Equal(t, 3.2, result, "Should use MeanPrefillSec as base")
+	})
+
+	t.Run("zero Lambda falls back", func(t *testing.T) {
+		lambda := 0.0
+		p95Queue := 3.0
+		metrics := PodMetrics{
+			NumWaiting:    5,
+			LambdaReqPerS: &lambda,
+			P95QueueSec:   &p95Queue,
+		}
+
+		// P95 is available, should use it (Method A)
+		result := estimator.estimateQueueTime(metrics)
+		assert.Equal(t, 3.0, result, "Should use P95 when Lambda is 0")
 	})
 }
 
@@ -235,19 +261,35 @@ func TestEstimatePrefillTime(t *testing.T) {
 		assert.InDelta(t, 0.252, result, 0.01, "Throughput-based estimation")
 	})
 
-	t.Run("throughput with EMA calibration", func(t *testing.T) {
-		meanPrefill := 1.0
+	// Phase 008: EMA now fuses per-token time, not per-request time
+	t.Run("throughput with EMA per-token calibration", func(t *testing.T) {
+		meanPrefillPerTok := 0.0008 // 0.8ms per token from historical data
 		metrics := PodMetrics{
-			PromptTokPerS:  2000,
-			MeanPrefillSec: &meanPrefill,
+			PromptTokPerS:     2000, // 2000 tok/s -> instant = 0.0005 s/tok
+			MeanPrefillPerTok: &meanPrefillPerTok,
 		}
 
 		// Uncached: 512 tokens
-		// Base estimate = 512 / 2000 = 0.256s
-		// Calibrated = 0.7 * 0.256 + 0.3 * 1.0 = 0.1792 + 0.3 = 0.4792s
+		// instantPerTok = 1/2000 = 0.0005 s/tok
+		// EMA: 0.7 * 0.0005 + 0.3 * 0.0008 = 0.00035 + 0.00024 = 0.00059 s/tok
+		// result = 512 * 0.00059 = 0.30208
 		result := estimator.estimatePrefillTime(512, 0, 16, metrics)
 
-		assert.InDelta(t, 0.4792, result, 0.01, "EMA calibrated estimation")
+		expected := 512 * (0.7*0.0005 + 0.3*0.0008)
+		assert.InDelta(t, expected, result, 0.01, "EMA per-token calibration")
+	})
+
+	t.Run("throughput only (no per-token history)", func(t *testing.T) {
+		// When MeanPrefillPerTok is not available, just use throughput
+		metrics := PodMetrics{
+			PromptTokPerS: 2000, // 2000 tok/s -> 0.0005 s/tok
+		}
+
+		// Uncached: 512 tokens
+		// result = 512 * 0.0005 = 0.256s
+		result := estimator.estimatePrefillTime(512, 0, 16, metrics)
+
+		assert.InDelta(t, 0.256, result, 0.01, "Throughput only estimation")
 	})
 
 	t.Run("historical scaling", func(t *testing.T) {

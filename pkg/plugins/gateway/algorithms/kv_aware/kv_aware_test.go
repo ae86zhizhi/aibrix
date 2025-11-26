@@ -398,6 +398,7 @@ func TestConstants(t *testing.T) {
 		assert.Equal(t, "model.aibrix.ai/model-name", ModelLabelKey)
 	})
 }
+
 // Tests for Statistics (Phase 007)
 
 func TestStatistics_IncrementCounters(t *testing.T) {

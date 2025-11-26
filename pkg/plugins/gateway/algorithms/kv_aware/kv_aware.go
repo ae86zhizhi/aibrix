@@ -76,9 +76,9 @@ type kvAwareRouter struct {
 	tokenizer      Tokenizer
 	metricsReader  MetricsReader
 	metricsCache   *metricsCache
-	ttftEstimator  TTFTEstimator  // Phase 005: TTFT estimation
-	decodeSelector DecodeSelector // Phase 006: Decode selection
-	sloChecker     SLOChecker     // Phase 006: SLO checking
+	ttftEstimator  TTFTEstimator     // Phase 005: TTFT estimation
+	decodeSelector DecodeSelector    // Phase 006: Decode selection
+	sloChecker     SLOChecker        // Phase 006: SLO checking
 	stats          RoutingStatistics // Phase 007: Statistics tracking (noop for now)
 	fallbackAlgo   types.RoutingAlgorithm
 }

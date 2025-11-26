@@ -52,6 +52,11 @@ const (
 	// Realtime metrics
 	RealtimeNumRequestsRunning = "realtime_num_requests_running"
 	RealtimeNormalizedPendings = "realtime_normalized_pendings"
+
+	// Phase 008: KV-aware estimation metrics
+	RequestThroughputRate1m = "request_throughput_rate_1m" // True λ for Little's Law
+	AvgNumWaiting5m         = "avg_num_waiting_5m"         // Historical average queue length
+	MeanPrefillPerTok5m     = "mean_prefill_per_tok_5m"    // Per-token prefill time
 )
 
 var (
@@ -386,6 +391,34 @@ var (
 				Raw: Gauge,
 			},
 			Description: "Current adaptive bucket size used by VTC algorithm for token normalization",
+		},
+		// Phase 008: KV-aware estimation metrics
+		RequestThroughputRate1m: {
+			MetricScope:  PodMetricScope,
+			MetricSource: PrometheusEndpoint,
+			MetricType: MetricType{
+				Query: PromQL,
+			},
+			PromQL:      `sum(rate(vllm:request_success_total{instance="${instance}", job="pods"}[1m]))`,
+			Description: "Request completion rate (req/s) - true λ for Little's Law",
+		},
+		AvgNumWaiting5m: {
+			MetricScope:  PodMetricScope,
+			MetricSource: PrometheusEndpoint,
+			MetricType: MetricType{
+				Query: PromQL,
+			},
+			PromQL:      `avg_over_time(vllm:num_requests_waiting{instance="${instance}", job="pods"}[5m])`,
+			Description: "Average queue length over 5m window",
+		},
+		MeanPrefillPerTok5m: {
+			MetricScope:  PodMetricScope,
+			MetricSource: PrometheusEndpoint,
+			MetricType: MetricType{
+				Query: PromQL,
+			},
+			PromQL:      `sum(rate(vllm:request_prefill_time_seconds_sum{instance="${instance}", job="pods"}[5m])) / sum(rate(vllm:request_prompt_tokens_sum{instance="${instance}", job="pods"}[5m]))`,
+			Description: "Average prefill time per token (seconds/token)",
 		},
 	}
 )

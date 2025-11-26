@@ -17,7 +17,6 @@ limitations under the License.
 package kvaware
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -116,115 +115,150 @@ func (r *cacheMetricsReader) fetchThroughputMetrics(pm *PodMetrics, podRef PodRe
 	return nil
 }
 
-// getMeanPrefillTime fetches or calculates mean prefill time
-func (r *cacheMetricsReader) getMeanPrefillTime(podRef PodRef) (float64, error) {
-	// Try direct metric first
-	if val, err := r.getMetricValue(podRef, metrics.RequestPrefillTimeSeconds); err == nil {
-		if histVal, err := r.cache.GetMetricValueByPod(podRef.Name, podRef.Namespace, metrics.RequestPrefillTimeSeconds); err == nil {
-			if hist := histVal.GetHistogramValue(); hist != nil {
-				return hist.GetMean(), nil
-			}
-		}
-		return val, nil
-	}
-
-	// Fallback: Calculate from inference - decode
-	inferenceTime, err1 := r.getMetricValue(podRef, metrics.RequestInferenceTimeSeconds)
-	decodeTime, err2 := r.getMetricValue(podRef, metrics.RequestDecodeTimeSeconds)
-
-	if err1 == nil && err2 == nil && inferenceTime > decodeTime {
-		return inferenceTime - decodeTime, nil
-	}
-
-	return 0, fmt.Errorf("unable to determine prefill time")
-}
-
-// getP95QueueTime fetches or estimates P95 queue time
-func (r *cacheMetricsReader) getP95QueueTime(podRef PodRef) (float64, error) {
-	// Try to get queue time histogram
-	if histVal, err := r.cache.GetMetricValueByPod(podRef.Name, podRef.Namespace, metrics.RequestQueueTimeSeconds); err == nil {
-		if hist := histVal.GetHistogramValue(); hist != nil {
-			if p95, err := hist.GetPercentile(95); err == nil {
-				return p95, nil
-			}
-		}
-	}
-
-	// Simple approximation: 1.5x average queue time
-	queueTime, err := r.getMetricValue(podRef, metrics.RequestQueueTimeSeconds)
+// fetchQueueMetricsFromHistogram extracts queue time metrics from histogram
+// This is the PREFERRED source for queue time estimation
+func (r *cacheMetricsReader) fetchQueueMetricsFromHistogram(pm *PodMetrics, podRef PodRef) {
+	histVal, err := r.cache.GetMetricValueByPod(
+		podRef.Name, podRef.Namespace,
+		metrics.RequestQueueTimeSeconds,
+	)
 	if err != nil {
-		return 0, err
+		klog.V(5).Infof("Queue histogram not available for %s: %v", podRef.Name, err)
+		return
 	}
 
-	return queueTime * 1.5, nil
+	hist := histVal.GetHistogramValue()
+	if hist == nil || hist.Count == 0 {
+		klog.V(5).Infof("Queue histogram empty for %s", podRef.Name)
+		return
+	}
+
+	// Mean queue time from histogram
+	mean := hist.GetMean()
+	pm.MeanQueueSec = &mean
+
+	// P95 queue time from histogram
+	if p95, err := hist.GetPercentile(95); err == nil {
+		pm.P95QueueSec = &p95
+		klog.V(5).Infof("Queue metrics for %s: mean=%.3fs, P95=%.3fs (samples=%.0f)",
+			podRef.Name, mean, p95, hist.Count)
+	}
 }
 
-// fetchAggregatedMetrics fetches aggregated metrics from Prometheus
+// fetchPrefillMetricsFromHistogram extracts prefill time metrics from histogram
+// This is the CORRECT source for pure PREFILL phase time (not e2e latency)
+func (r *cacheMetricsReader) fetchPrefillMetricsFromHistogram(pm *PodMetrics, podRef PodRef) {
+	histVal, err := r.cache.GetMetricValueByPod(
+		podRef.Name, podRef.Namespace,
+		metrics.RequestPrefillTimeSeconds,
+	)
+	if err != nil {
+		klog.V(5).Infof("Prefill histogram not available for %s: %v", podRef.Name, err)
+		return
+	}
+
+	hist := histVal.GetHistogramValue()
+	if hist == nil || hist.Count == 0 {
+		klog.V(5).Infof("Prefill histogram empty for %s", podRef.Name)
+		return
+	}
+
+	// Mean prefill time (pure PREFILL phase)
+	mean := hist.GetMean()
+	pm.MeanPrefillSec = &mean
+	klog.V(5).Infof("Prefill metrics for %s: mean=%.3fs (samples=%.0f)",
+		podRef.Name, mean, hist.Count)
+}
+
+// fetchTPOTMetricsFromHistogram extracts TPOT metrics from histogram
+func (r *cacheMetricsReader) fetchTPOTMetricsFromHistogram(pm *PodMetrics, podRef PodRef) {
+	histVal, err := r.cache.GetMetricValueByPod(
+		podRef.Name, podRef.Namespace,
+		metrics.TimePerOutputTokenSeconds,
+	)
+	if err != nil {
+		return
+	}
+
+	hist := histVal.GetHistogramValue()
+	if hist == nil || hist.Count == 0 {
+		return
+	}
+
+	mean := hist.GetMean()
+	pm.AvgTPOTSec = &mean
+
+	if p95, err := hist.GetPercentile(95); err == nil {
+		pm.P95TPOTSec = &p95
+	}
+}
+
+// fetchPromQLMetrics fetches PromQL-based aggregated metrics
+// These metrics require Prometheus to be available
+func (r *cacheMetricsReader) fetchPromQLMetrics(pm *PodMetrics, podRef PodRef) {
+	// Lambda (true throughput rate for Little's Law)
+	if val, err := r.getMetricValue(podRef, metrics.RequestThroughputRate1m); err == nil && val > 0 {
+		pm.LambdaReqPerS = &val
+		klog.V(5).Infof("Lambda for %s: %.2f req/s", podRef.Name, val)
+	}
+
+	// Average queue length baseline (for scaling estimation)
+	if val, err := r.getMetricValue(podRef, metrics.AvgNumWaiting5m); err == nil {
+		pm.AvgNumWaiting = &val
+	}
+
+	// Per-token prefill time
+	if val, err := r.getMetricValue(podRef, metrics.MeanPrefillPerTok5m); err == nil && val > 0 {
+		pm.MeanPrefillPerTok = &val
+		klog.V(5).Infof("PrefillPerTok for %s: %.6f s/tok", podRef.Name, val)
+	}
+}
+
+// fetchAggregatedMetrics fetches histogram and PromQL-aggregated metrics
+// Phase 008: Refactored to prioritize direct histogram measurements
 func (r *cacheMetricsReader) fetchAggregatedMetrics(pm *PodMetrics, podRef PodRef) error {
-	// Only fetch if Prometheus enabled
-	if !r.config.PromEnabled {
-		return nil
-	}
+	// ===== 1. Queue Metrics from Histogram (PREFERRED) =====
+	r.fetchQueueMetricsFromHistogram(pm, podRef)
 
-	// Fetch P95 TPOT (5m window)
-	if val, err := r.getMetricValue(podRef, metrics.P95TPOT5mPod); err == nil {
-		pm.P95TPOTSec = &val
-	} else {
-		klog.V(5).Infof("Failed to fetch P95TPOT5mPod for %s: %v", podRef.Name, err)
-	}
+	// ===== 2. Prefill Metrics from Histogram (CORRECT SOURCE) =====
+	r.fetchPrefillMetricsFromHistogram(pm, podRef)
 
-	// Fetch Average TPOT (5m window)
-	if val, err := r.getMetricValue(podRef, metrics.AvgTPOT5mPod); err == nil {
-		pm.AvgTPOTSec = &val
-	} else {
-		klog.V(5).Infof("Failed to fetch AvgTPOT5mPod for %s: %v", podRef.Name, err)
-	}
+	// ===== 3. TPOT Metrics from Histogram =====
+	r.fetchTPOTMetricsFromHistogram(pm, podRef)
 
-	// Fetch mean prefill time
-	if val, err := r.getMeanPrefillTime(podRef); err == nil {
-		pm.MeanPrefillSec = &val
-	} else {
-		klog.V(5).Infof("Failed to fetch mean prefill time for %s: %v", podRef.Name, err)
-	}
-
-	// Fetch P95 queue time
-	if val, err := r.getP95QueueTime(podRef); err == nil {
-		pm.P95QueueSec = &val
-	} else {
-		klog.V(5).Infof("Failed to fetch P95 queue time for %s: %v", podRef.Name, err)
+	// ===== 4. PromQL Aggregated Metrics (if Prometheus available) =====
+	if r.config.PromEnabled {
+		r.fetchPromQLMetrics(pm, podRef)
 	}
 
 	return nil
 }
 
 // applyFallbackValues applies default values for missing metrics
+// Phase 008: Removed hardcoded fallbacks for queue/prefill metrics
+// The estimation algorithms now handle missing data gracefully
 func (r *cacheMetricsReader) applyFallbackValues(pm *PodMetrics) {
-	// Throughput defaults
+	// Throughput defaults (keep these as they represent hardware capability)
 	if pm.PromptTokPerS == 0 {
-		pm.PromptTokPerS = 1000 // 1k tokens/sec
+		pm.PromptTokPerS = 1000 // 1k tokens/sec - reasonable default
 		klog.V(5).Info("Using default prompt throughput: 1000 tok/s")
 	}
 
 	if pm.GenTokPerS == 0 {
-		pm.GenTokPerS = 100 // 100 tokens/sec
+		pm.GenTokPerS = 100 // 100 tokens/sec - reasonable default
 		klog.V(5).Info("Using default generation throughput: 100 tok/s")
 	}
 
-	// Aggregated metric defaults (nullable pointers)
-	if pm.MeanPrefillSec == nil {
-		defaultPrefill := 1.0 // 1 second
-		pm.MeanPrefillSec = &defaultPrefill
-		klog.V(5).Info("Using default mean prefill time: 1.0s")
-	}
+	// NOTE: DO NOT set hardcoded defaults for queue/prefill metrics.
+	// The estimation algorithms (estimate.go) handle missing data with
+	// multi-level fallback that binds to historical observations.
+	// - MeanQueueSec, P95QueueSec: handled by estimateQueueTime
+	// - MeanPrefillSec, MeanPrefillPerTok: handled by estimatePrefillTime
+	// - LambdaReqPerS, AvgNumWaiting: handled by estimateQueueTime
 
-	if pm.P95QueueSec == nil {
-		defaultQueue := 0.5 // 0.5 second
-		pm.P95QueueSec = &defaultQueue
-		klog.V(5).Info("Using default P95 queue time: 0.5s")
-	}
-
+	// TPOT fallback (for TBT SLO checking only)
 	if pm.P95TPOTSec == nil {
-		defaultTPOT := 0.2 // 200ms
+		defaultTPOT := 0.2 // 200ms - conservative estimate
 		pm.P95TPOTSec = &defaultTPOT
 		klog.V(5).Info("Using default P95 TPOT: 0.2s")
 	}
@@ -255,12 +289,11 @@ func (r *cacheMetricsReader) GetPodMetrics(podRef PodRef) (PodMetrics, error) {
 			podRef.Name, err)
 	}
 
-	// Get aggregated metrics if Prometheus enabled
-	if r.config.PromEnabled {
-		if err := r.fetchAggregatedMetrics(&podMetrics, podRef); err != nil {
-			klog.V(4).Infof("Failed to fetch aggregated metrics for %s: %v",
-				podRef.Name, err)
-		}
+	// Get aggregated metrics (histograms always available, PromQL requires Prometheus)
+	// Phase 008: Always fetch histogram metrics, PromQL is conditional inside fetchAggregatedMetrics
+	if err := r.fetchAggregatedMetrics(&podMetrics, podRef); err != nil {
+		klog.V(4).Infof("Failed to fetch aggregated metrics for %s: %v",
+			podRef.Name, err)
 	}
 
 	// Apply fallback values for missing metrics

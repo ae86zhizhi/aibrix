@@ -1,3 +1,4 @@
+//go:build e2e
 // +build e2e
 
 /*
@@ -224,7 +225,7 @@ func TestE2E_GracefulDegradation(t *testing.T) {
 		expectSuccess bool
 	}{
 		{"normal", 2, 2, true},
-		{"no-decode", 2, 0, false}, // Should fallback
+		{"no-decode", 2, 0, false},  // Should fallback
 		{"no-prefill", 0, 2, false}, // Should fallback
 		{"minimal", 1, 1, true},
 	}

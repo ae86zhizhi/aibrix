@@ -76,6 +76,10 @@ var (
 		metrics.AvgRequestsPerMinPod,
 		metrics.AvgPromptThroughputToksPerMinPod,
 		metrics.AvgGenerationThroughputToksPerMinPod,
+		// Phase 008: KV-aware estimation metrics
+		metrics.RequestThroughputRate1m,
+		metrics.AvgNumWaiting5m,
+		metrics.MeanPrefillPerTok5m,
 	}
 
 	labelQueryMetricNames = []string{

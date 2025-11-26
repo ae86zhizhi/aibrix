@@ -96,45 +96,90 @@ func (e *defaultTTFTEstimator) estimateTransferTime(
 	return 0
 }
 
+// clamp restricts value to [min, max] range
+func clamp(value, min, max float64) float64 {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
 // estimateQueueTime calculates expected queue waiting time
+// Phase 008: Refactored with correct priority order and algorithms
+// Priority: Direct histogram P95 > Little's Law with true λ > Heuristic fallback
 func (e *defaultTTFTEstimator) estimateQueueTime(metrics PodMetrics) float64 {
-	// Method 1: Use service rate if we have historical data
-	if metrics.MeanPrefillSec != nil && *metrics.MeanPrefillSec > 0 {
-		serviceRate := 1.0 / *metrics.MeanPrefillSec
-		if serviceRate > 0 && metrics.NumWaiting > 0 {
-			// Little's Law approximation
-			queueTime := metrics.NumWaiting / serviceRate
-
-			// Apply dampening factor for stability
-			queueTime *= e.config.QueueFallbackMultiplier
-
-			klog.V(5).Infof("Queue time (service rate): %.0f waiting / %.2f svc_rate = %.2fs",
-				metrics.NumWaiting, serviceRate, queueTime)
-
-			return queueTime
-		}
-	}
-
-	// Method 2: Use historical P95 queue time
+	// ===== Method A: Direct from queue histogram (PREFERRED) =====
+	// P95 queue time directly from request_queue_time_seconds histogram
 	if metrics.P95QueueSec != nil && *metrics.P95QueueSec > 0 {
-		klog.V(5).Infof("Queue time (P95): %.2fs", *metrics.P95QueueSec)
-		return *metrics.P95QueueSec
+		p95Queue := *metrics.P95QueueSec
+
+		// Optional: Scale based on current vs average queue length
+		// If current queue is longer than average, estimate proportionally longer wait
+		if metrics.AvgNumWaiting != nil && *metrics.AvgNumWaiting > 0 && metrics.NumWaiting > 0 {
+			ratio := metrics.NumWaiting / *metrics.AvgNumWaiting
+			if ratio > 1.0 {
+				// Sub-linear scaling: queue 2x longer doesn't mean 2x wait
+				// Using β = 0.7 for conservative scaling
+				scale := math.Pow(ratio, 0.7)
+				p95Queue *= scale
+				klog.V(5).Infof("Queue time (Method A scaled): P95=%.3fs, ratio=%.2f, scale=%.2f, result=%.3fs",
+					*metrics.P95QueueSec, ratio, scale, p95Queue)
+			}
+		} else {
+			klog.V(5).Infof("Queue time (Method A direct): P95=%.3fs", p95Queue)
+		}
+
+		return p95Queue
 	}
 
-	// Method 3: Fallback heuristic based on queue length
+	// ===== Method B: Little's Law with true λ =====
+	// L = λ × W => W = L / λ
+	// where λ = rate(request_success_total) is true throughput
+	if metrics.LambdaReqPerS != nil && *metrics.LambdaReqPerS > 0 && metrics.NumWaiting > 0 {
+		lambda := *metrics.LambdaReqPerS
+		W_mean := metrics.NumWaiting / lambda // Little's Law: W = L / λ
+
+		// Apply P95/Mean ratio if available, otherwise use default 1.5
+		factor := 1.5 // Default P95/Mean ratio assumption for queue times
+		if metrics.P95QueueSec != nil && metrics.MeanQueueSec != nil && *metrics.MeanQueueSec > 0 {
+			factor = *metrics.P95QueueSec / *metrics.MeanQueueSec
+		}
+
+		queueTime := W_mean * factor
+		klog.V(5).Infof("Queue time (Method B Little's Law): L=%.0f, λ=%.2f req/s, W_mean=%.3fs, factor=%.2f, result=%.3fs",
+			metrics.NumWaiting, lambda, W_mean, factor, queueTime)
+
+		return queueTime
+	}
+
+	// ===== Method C: Heuristic fallback (bound to historical data) =====
+	// Instead of hardcoded 0.5s/request, use MeanPrefillSec as proxy
 	if metrics.NumWaiting > 0 {
-		// Assume ~0.5s per queued request as rough estimate
-		queueTime := metrics.NumWaiting * 0.5
-		klog.V(5).Infof("Queue time (fallback): %.0f waiting * 0.5 = %.2fs",
-			metrics.NumWaiting, queueTime)
+		// Use MeanPrefillSec as proxy for "time per request" if available
+		// Clamped to reasonable range [0.05s, 2.0s] to prevent extreme values
+		basePerReq := 0.5 // Default 500ms per request
+		if metrics.MeanPrefillSec != nil && *metrics.MeanPrefillSec > 0 {
+			basePerReq = clamp(*metrics.MeanPrefillSec, 0.05, 2.0)
+		}
+
+		queueTime := metrics.NumWaiting * basePerReq
+		klog.V(5).Infof("Queue time (Method C fallback): %.0f waiting * %.3fs/req = %.3fs",
+			metrics.NumWaiting, basePerReq, queueTime)
+
 		return queueTime
 	}
 
 	// No queue
+	klog.V(5).Info("Queue time: 0 (no waiting requests)")
 	return 0
 }
 
 // estimatePrefillTime calculates expected prefill computation time
+// Phase 008: Refactored to use per-token time for accurate scaling
+// Uses EMA fusion of real-time throughput and historical per-token time
 func (e *defaultTTFTEstimator) estimatePrefillTime(
 	totalTokens int,
 	cachedBlocks int,
@@ -144,58 +189,69 @@ func (e *defaultTTFTEstimator) estimatePrefillTime(
 	// Calculate uncached tokens
 	cachedTokens := cachedBlocks * blockSize
 	uncachedTokens := totalTokens - cachedTokens
-	if uncachedTokens < 0 {
-		uncachedTokens = 0
-	}
-
-	// No prefill needed if everything is cached
-	if uncachedTokens == 0 {
-		klog.V(5).Info("All tokens cached, no prefill needed")
+	if uncachedTokens <= 0 {
+		klog.V(5).Info("Prefill time: 0 (all tokens cached)")
 		return 0
 	}
 
-	// Method 1: Throughput-based estimation
+	// ===== Method 1: Real-time throughput + per-token EMA (PREFERRED) =====
+	// Use current throughput and optionally fuse with historical per-token time
 	if metrics.PromptTokPerS > 0 {
-		baseEstimate := float64(uncachedTokens) / metrics.PromptTokPerS
+		instantPerTok := 1.0 / metrics.PromptTokPerS // Current per-token time
 
-		// Apply EMA calibration with historical data if available
-		if metrics.MeanPrefillSec != nil && *metrics.MeanPrefillSec > 0 {
-			// Weight: ema_alpha for model, (1-ema_alpha) for historical
-			calibrated := e.config.EMAAlpha*baseEstimate +
-				(1-e.config.EMAAlpha)*(*metrics.MeanPrefillSec)
+		// Apply EMA with historical per-token time if available
+		perTok := instantPerTok
+		if metrics.MeanPrefillPerTok != nil && *metrics.MeanPrefillPerTok > 0 {
+			// EMA fusion: α * instant + (1-α) * historical
+			// This provides smoothing between current and historical measurements
+			perTok = e.config.EMAAlpha*instantPerTok +
+				(1-e.config.EMAAlpha)*(*metrics.MeanPrefillPerTok)
 
-			klog.V(5).Infof("Prefill time (calibrated): %d tokens / %.0f tok/s = %.2fs base, %.2fs calibrated",
-				uncachedTokens, metrics.PromptTokPerS, baseEstimate, calibrated)
-
-			return calibrated
+			klog.V(5).Infof("Prefill time (Method 1 EMA): instant=%.6fs/tok, hist=%.6fs/tok, fused=%.6fs/tok",
+				instantPerTok, *metrics.MeanPrefillPerTok, perTok)
 		}
 
-		klog.V(5).Infof("Prefill time (throughput): %d tokens / %.0f tok/s = %.2fs",
-			uncachedTokens, metrics.PromptTokPerS, baseEstimate)
+		prefillTime := float64(uncachedTokens) * perTok
+		klog.V(5).Infof("Prefill time (Method 1): %d tokens * %.6fs/tok = %.3fs",
+			uncachedTokens, perTok, prefillTime)
 
-		return baseEstimate
+		return prefillTime
 	}
 
-	// Method 2: Pure historical if no throughput data
+	// ===== Method 2: Historical per-token time only =====
+	// Use MeanPrefillPerTok from PromQL if available
+	if metrics.MeanPrefillPerTok != nil && *metrics.MeanPrefillPerTok > 0 {
+		prefillTime := float64(uncachedTokens) * (*metrics.MeanPrefillPerTok)
+		klog.V(5).Infof("Prefill time (Method 2): %d tokens * %.6fs/tok = %.3fs",
+			uncachedTokens, *metrics.MeanPrefillPerTok, prefillTime)
+
+		return prefillTime
+	}
+
+	// ===== Method 3: Derive per-token from MeanPrefillSec =====
+	// If we have average prefill time but not per-token, estimate it
 	if metrics.MeanPrefillSec != nil && *metrics.MeanPrefillSec > 0 {
-		// Scale by token ratio
-		avgTokensPerRequest := 512 // Assumed average
-		scaleFactor := float64(uncachedTokens) / float64(avgTokensPerRequest)
-		scaled := *metrics.MeanPrefillSec * scaleFactor
+		// Estimate average tokens per request from configuration or use default
+		avgToksPerReq := 512.0 // Default assumption
 
-		klog.V(5).Infof("Prefill time (historical): %.2fs * %.2f scale = %.2fs",
-			*metrics.MeanPrefillSec, scaleFactor, scaled)
+		derivedPerTok := *metrics.MeanPrefillSec / avgToksPerReq
+		prefillTime := float64(uncachedTokens) * derivedPerTok
 
-		return scaled
+		klog.V(5).Infof("Prefill time (Method 3 derived): mean=%.3fs, avgToks=%.0f, perTok=%.6fs, result=%.3fs",
+			*metrics.MeanPrefillSec, avgToksPerReq, derivedPerTok, prefillTime)
+
+		return prefillTime
 	}
 
-	// Method 3: Fallback constant time per token
-	// Assume 1ms per token as extreme fallback
-	fallback := float64(uncachedTokens) * 0.001
-	klog.V(5).Infof("Prefill time (fallback): %d tokens * 0.001 = %.2fs",
-		uncachedTokens, fallback)
+	// ===== Method 4: Fallback constant (last resort) =====
+	// Use 1ms/token as conservative fallback
+	fallbackPerTok := 0.001 // 1ms per token
 
-	return fallback
+	prefillTime := float64(uncachedTokens) * fallbackPerTok
+	klog.V(5).Infof("Prefill time (Method 4 fallback): %d tokens * %.6fs/tok = %.3fs",
+		uncachedTokens, fallbackPerTok, prefillTime)
+
+	return prefillTime
 }
 
 // EstimateTTFT calculates all TTFT components for a single pod
@@ -242,9 +298,9 @@ func (e *defaultTTFTEstimator) EstimateTTFT(
 
 	// Apply bounds and sanity checks
 	components := TTFTComponents{
-		TransferTime: e.boundValue(tTransfer, 0, 10),   // Max 10s transfer
-		QueueTime:    e.boundValue(tQueue, 0, 30),      // Max 30s queue
-		PrefillTime:  e.boundValue(tPrefill, 0, 60),    // Max 60s prefill
+		TransferTime: e.boundValue(tTransfer, 0, 10), // Max 10s transfer
+		QueueTime:    e.boundValue(tQueue, 0, 30),    // Max 30s queue
+		PrefillTime:  e.boundValue(tPrefill, 0, 60),  // Max 60s prefill
 	}
 
 	components.TotalTTFT = components.TransferTime +

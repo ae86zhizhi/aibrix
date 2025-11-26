@@ -128,6 +128,7 @@ func (m *mockCacheForMetrics) GetRouter(ctx *types.RoutingContext) (types.Router
 }
 
 // TestGetPodMetrics_AllAvailable tests fetching metrics when all are available
+// Phase 008: Updated to include new histogram and PromQL metrics
 func TestGetPodMetrics_AllAvailable(t *testing.T) {
 	mockCache := new(mockCacheForMetrics)
 	config := &KVAwareConfig{
@@ -158,15 +159,21 @@ func TestGetPodMetrics_AllAvailable(t *testing.T) {
 	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.AvgGenerationThroughputToksPerS).
 		Return(&metrics.SimpleMetricValue{Value: 150.0}, nil)
 
-	// Mock aggregated metrics
-	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.P95TPOT5mPod).
-		Return(&metrics.SimpleMetricValue{Value: 0.15}, nil)
-	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.AvgTPOT5mPod).
-		Return(&metrics.SimpleMetricValue{Value: 0.10}, nil)
-	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestPrefillTimeSeconds).
-		Return(&metrics.HistogramMetricValue{Sum: 10.0, Count: 10.0}, nil)
+	// Phase 008: Mock histogram metrics (always called)
 	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestQueueTimeSeconds).
 		Return(&metrics.HistogramMetricValue{Sum: 5.0, Count: 10.0, Buckets: map[string]float64{"0.5": 9.0, "1.0": 10.0}}, nil)
+	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestPrefillTimeSeconds).
+		Return(&metrics.HistogramMetricValue{Sum: 10.0, Count: 10.0}, nil)
+	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.TimePerOutputTokenSeconds).
+		Return(&metrics.HistogramMetricValue{Sum: 1.5, Count: 10.0, Buckets: map[string]float64{"0.1": 5.0, "0.2": 9.5, "0.5": 10.0}}, nil)
+
+	// Phase 008: Mock PromQL metrics (called when PromEnabled=true)
+	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestThroughputRate1m).
+		Return(&metrics.SimpleMetricValue{Value: 2.5}, nil)
+	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.AvgNumWaiting5m).
+		Return(&metrics.SimpleMetricValue{Value: 3.0}, nil)
+	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.MeanPrefillPerTok5m).
+		Return(&metrics.SimpleMetricValue{Value: 0.0008}, nil)
 
 	result, err := reader.GetPodMetrics(podRef)
 
@@ -178,15 +185,25 @@ func TestGetPodMetrics_AllAvailable(t *testing.T) {
 	assert.Equal(t, 50.0, result.CPUCacheUsage)
 	assert.Equal(t, 2000.0, result.PromptTokPerS)
 	assert.Equal(t, 150.0, result.GenTokPerS)
-	assert.NotNil(t, result.P95TPOTSec)
-	assert.Equal(t, 0.15, *result.P95TPOTSec)
+	// Phase 008: Verify new metrics
+	assert.NotNil(t, result.MeanQueueSec)
+	assert.Equal(t, 0.5, *result.MeanQueueSec) // Sum/Count = 5/10
 	assert.NotNil(t, result.MeanPrefillSec)
-	assert.Equal(t, 1.0, *result.MeanPrefillSec)
+	assert.Equal(t, 1.0, *result.MeanPrefillSec) // Sum/Count = 10/10
+	assert.NotNil(t, result.AvgTPOTSec)
+	assert.Equal(t, 0.15, *result.AvgTPOTSec) // Sum/Count = 1.5/10
+	assert.NotNil(t, result.LambdaReqPerS)
+	assert.Equal(t, 2.5, *result.LambdaReqPerS)
+	assert.NotNil(t, result.AvgNumWaiting)
+	assert.Equal(t, 3.0, *result.AvgNumWaiting)
+	assert.NotNil(t, result.MeanPrefillPerTok)
+	assert.Equal(t, 0.0008, *result.MeanPrefillPerTok)
 
 	mockCache.AssertExpectations(t)
 }
 
 // TestGetPodMetrics_SomeMissing tests fetching metrics when some are missing
+// Phase 008: Updated to add histogram mock expectations (no fallbacks for queue/prefill)
 func TestGetPodMetrics_SomeMissing(t *testing.T) {
 	mockCache := new(mockCacheForMetrics)
 	config := &KVAwareConfig{
@@ -215,6 +232,14 @@ func TestGetPodMetrics_SomeMissing(t *testing.T) {
 	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.AvgGenerationThroughputToksPerS).
 		Return(nil, fmt.Errorf("metric not found"))
 
+	// Phase 008: Mock histogram metrics as missing (always called)
+	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestQueueTimeSeconds).
+		Return(nil, fmt.Errorf("metric not found"))
+	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestPrefillTimeSeconds).
+		Return(nil, fmt.Errorf("metric not found"))
+	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.TimePerOutputTokenSeconds).
+		Return(nil, fmt.Errorf("metric not found"))
+
 	result, err := reader.GetPodMetrics(podRef)
 
 	assert.NoError(t, err)
@@ -224,13 +249,18 @@ func TestGetPodMetrics_SomeMissing(t *testing.T) {
 	assert.Equal(t, 60.0, result.GPUCacheUsage)
 	assert.Equal(t, 1000.0, result.PromptTokPerS) // Fallback value
 	assert.Equal(t, 100.0, result.GenTokPerS)     // Fallback value
-	assert.NotNil(t, result.MeanPrefillSec)
-	assert.Equal(t, 1.0, *result.MeanPrefillSec) // Fallback value
+	// Phase 008: No fallback for MeanPrefillSec, should be nil
+	assert.Nil(t, result.MeanPrefillSec) // No hardcoded fallback
+	assert.Nil(t, result.P95QueueSec)    // No hardcoded fallback
+	// P95TPOTSec has fallback
+	assert.NotNil(t, result.P95TPOTSec)
+	assert.Equal(t, 0.2, *result.P95TPOTSec) // TPOT fallback for TBT SLO
 
 	mockCache.AssertExpectations(t)
 }
 
 // TestApplyFallbackValues tests fallback value application
+// Phase 008: Removed MeanPrefillSec and P95QueueSec fallbacks
 func TestApplyFallbackValues(t *testing.T) {
 	mockCache := new(mockCacheForMetrics)
 	config := &KVAwareConfig{}
@@ -246,17 +276,22 @@ func TestApplyFallbackValues(t *testing.T) {
 
 	reader.applyFallbackValues(pm)
 
+	// Throughput fallbacks are kept (hardware capability)
 	assert.Equal(t, 1000.0, pm.PromptTokPerS)
 	assert.Equal(t, 100.0, pm.GenTokPerS)
-	assert.NotNil(t, pm.MeanPrefillSec)
-	assert.Equal(t, 1.0, *pm.MeanPrefillSec)
-	assert.NotNil(t, pm.P95QueueSec)
-	assert.Equal(t, 0.5, *pm.P95QueueSec)
+
+	// Phase 008: MeanPrefillSec and P95QueueSec NO LONGER have fallbacks
+	// The estimation algorithms handle missing data with multi-level fallback
+	assert.Nil(t, pm.MeanPrefillSec) // No hardcoded fallback
+	assert.Nil(t, pm.P95QueueSec)    // No hardcoded fallback
+
+	// P95TPOTSec still has fallback (needed for TBT SLO checking)
 	assert.NotNil(t, pm.P95TPOTSec)
 	assert.Equal(t, 0.2, *pm.P95TPOTSec)
 }
 
 // TestBatchGetPodMetrics tests concurrent batch fetching
+// Phase 008: Updated to include histogram mock expectations
 func TestBatchGetPodMetrics(t *testing.T) {
 	mockCache := new(mockCacheForMetrics)
 	config := &KVAwareConfig{
@@ -272,6 +307,7 @@ func TestBatchGetPodMetrics(t *testing.T) {
 
 	// Mock metrics for all pods
 	for _, pod := range pods {
+		// Gauge metrics
 		mockCache.On("GetMetricValueByPod", pod.Name, "default", metrics.NumRequestsWaiting).
 			Return(&metrics.SimpleMetricValue{Value: 1.0}, nil)
 		mockCache.On("GetMetricValueByPod", pod.Name, "default", metrics.NumRequestsRunning).
@@ -280,22 +316,32 @@ func TestBatchGetPodMetrics(t *testing.T) {
 			Return(&metrics.SimpleMetricValue{Value: 70.0}, nil)
 		mockCache.On("GetMetricValueByPod", pod.Name, "default", metrics.CPUCacheUsagePerc).
 			Return(nil, fmt.Errorf("not found"))
+
+		// Throughput metrics
 		mockCache.On("GetMetricValueByPod", pod.Name, "default", metrics.AvgPromptThroughputToksPerS).
 			Return(&metrics.SimpleMetricValue{Value: 1500.0}, nil)
 		mockCache.On("GetMetricValueByPod", pod.Name, "default", metrics.AvgGenerationThroughputToksPerS).
 			Return(&metrics.SimpleMetricValue{Value: 120.0}, nil)
+
+		// Phase 008: Histogram metrics (always called)
+		mockCache.On("GetMetricValueByPod", pod.Name, "default", metrics.RequestQueueTimeSeconds).
+			Return(&metrics.HistogramMetricValue{Sum: 5.0, Count: 10.0}, nil)
+		mockCache.On("GetMetricValueByPod", pod.Name, "default", metrics.RequestPrefillTimeSeconds).
+			Return(&metrics.HistogramMetricValue{Sum: 10.0, Count: 10.0}, nil)
+		mockCache.On("GetMetricValueByPod", pod.Name, "default", metrics.TimePerOutputTokenSeconds).
+			Return(&metrics.HistogramMetricValue{Sum: 1.0, Count: 10.0}, nil)
 	}
 
 	results := reader.BatchGetPodMetrics(pods)
 
 	assert.Equal(t, 3, len(results))
 	for _, pod := range pods {
-		metrics, exists := results[pod.Key()]
+		podMetrics, exists := results[pod.Key()]
 		assert.True(t, exists, "Metrics should exist for %s", pod.Name)
-		assert.True(t, metrics.MetricsAvailable)
-		assert.Equal(t, 1.0, metrics.NumWaiting)
-		assert.Equal(t, 2.0, metrics.NumRunning)
-		assert.Equal(t, 1500.0, metrics.PromptTokPerS)
+		assert.True(t, podMetrics.MetricsAvailable)
+		assert.Equal(t, 1.0, podMetrics.NumWaiting)
+		assert.Equal(t, 2.0, podMetrics.NumRunning)
+		assert.Equal(t, 1500.0, podMetrics.PromptTokPerS)
 	}
 
 	mockCache.AssertExpectations(t)
@@ -394,8 +440,8 @@ func TestMetricsCache_Clear(t *testing.T) {
 	assert.Equal(t, 0, cache.size())
 }
 
-// TestGetMeanPrefillTime tests prefill time calculation
-func TestGetMeanPrefillTime(t *testing.T) {
+// TestFetchQueueMetricsFromHistogram tests Phase 008 queue metrics extraction
+func TestFetchQueueMetricsFromHistogram(t *testing.T) {
 	mockCache := new(mockCacheForMetrics)
 	config := &KVAwareConfig{}
 	reader := &cacheMetricsReader{
@@ -408,32 +454,44 @@ func TestGetMeanPrefillTime(t *testing.T) {
 		Namespace: "default",
 	}
 
-	// Test with histogram
-	// Note: getMeanPrefillTime calls GetMetricValueByPod twice - once in getMetricValue, once for histogram
-	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestPrefillTimeSeconds).
-		Return(&metrics.HistogramMetricValue{Sum: 20.0, Count: 10.0}, nil).Times(2)
+	t.Run("extract mean and P95 from histogram", func(t *testing.T) {
+		hist := &metrics.HistogramMetricValue{
+			Sum:   20.0,
+			Count: 10.0,
+			Buckets: map[string]float64{
+				"0.1": 3.0,
+				"0.5": 7.0,
+				"1.0": 9.5,
+				"2.0": 10.0,
+			},
+		}
+		mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestQueueTimeSeconds).
+			Return(hist, nil).Once()
 
-	result, err := reader.getMeanPrefillTime(podRef)
-	assert.NoError(t, err)
-	assert.Equal(t, 2.0, result)
+		pm := &PodMetrics{}
+		reader.fetchQueueMetricsFromHistogram(pm, podRef)
 
-	// Test fallback calculation
-	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestPrefillTimeSeconds).
-		Return(nil, fmt.Errorf("not found")).Once()
-	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestInferenceTimeSeconds).
-		Return(&metrics.SimpleMetricValue{Value: 5.0}, nil).Once()
-	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestDecodeTimeSeconds).
-		Return(&metrics.SimpleMetricValue{Value: 2.0}, nil).Once()
+		assert.NotNil(t, pm.MeanQueueSec)
+		assert.Equal(t, 2.0, *pm.MeanQueueSec) // Sum/Count = 20/10 = 2.0
+		assert.NotNil(t, pm.P95QueueSec)
+	})
 
-	result, err = reader.getMeanPrefillTime(podRef)
-	assert.NoError(t, err)
-	assert.Equal(t, 3.0, result)
+	t.Run("handle missing histogram", func(t *testing.T) {
+		mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestQueueTimeSeconds).
+			Return(nil, fmt.Errorf("not found")).Once()
+
+		pm := &PodMetrics{}
+		reader.fetchQueueMetricsFromHistogram(pm, podRef)
+
+		assert.Nil(t, pm.MeanQueueSec)
+		assert.Nil(t, pm.P95QueueSec)
+	})
 
 	mockCache.AssertExpectations(t)
 }
 
-// TestGetP95QueueTime tests P95 queue time estimation
-func TestGetP95QueueTime(t *testing.T) {
+// TestFetchPrefillMetricsFromHistogram tests Phase 008 prefill metrics extraction
+func TestFetchPrefillMetricsFromHistogram(t *testing.T) {
 	mockCache := new(mockCacheForMetrics)
 	config := &KVAwareConfig{}
 	reader := &cacheMetricsReader{
@@ -446,23 +504,27 @@ func TestGetP95QueueTime(t *testing.T) {
 		Namespace: "default",
 	}
 
-	// Test with histogram
-	hist := &metrics.HistogramMetricValue{
-		Sum:   10.0,
-		Count: 10.0,
-		Buckets: map[string]float64{
-			"0.1": 3.0,
-			"0.5": 7.0,
-			"1.0": 9.5,
-			"2.0": 10.0,
-		},
-	}
-	mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestQueueTimeSeconds).
-		Return(hist, nil).Once()
+	t.Run("extract mean prefill from histogram", func(t *testing.T) {
+		hist := &metrics.HistogramMetricValue{Sum: 50.0, Count: 10.0}
+		mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestPrefillTimeSeconds).
+			Return(hist, nil).Once()
 
-	result, err := reader.getP95QueueTime(podRef)
-	assert.NoError(t, err)
-	assert.InDelta(t, 1.0, result, 0.1) // P95 should be around 1.0
+		pm := &PodMetrics{}
+		reader.fetchPrefillMetricsFromHistogram(pm, podRef)
+
+		assert.NotNil(t, pm.MeanPrefillSec)
+		assert.Equal(t, 5.0, *pm.MeanPrefillSec) // Sum/Count = 50/10 = 5.0
+	})
+
+	t.Run("handle missing histogram", func(t *testing.T) {
+		mockCache.On("GetMetricValueByPod", "test-pod", "default", metrics.RequestPrefillTimeSeconds).
+			Return(nil, fmt.Errorf("not found")).Once()
+
+		pm := &PodMetrics{}
+		reader.fetchPrefillMetricsFromHistogram(pm, podRef)
+
+		assert.Nil(t, pm.MeanPrefillSec)
+	})
 
 	mockCache.AssertExpectations(t)
 }

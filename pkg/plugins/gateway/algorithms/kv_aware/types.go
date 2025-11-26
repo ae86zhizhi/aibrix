@@ -79,11 +79,27 @@ type PodMetrics struct {
 	PromptTokPerS float64 `json:"prompt_tok_per_s"`
 	GenTokPerS    float64 `json:"gen_tok_per_s"`
 
-	// Aggregated metrics (5m window, nullable)
-	MeanPrefillSec *float64 `json:"mean_prefill_sec,omitempty"`
-	P95QueueSec    *float64 `json:"p95_queue_sec,omitempty"`
-	P95TPOTSec     *float64 `json:"p95_tpot_sec,omitempty"`
-	AvgTPOTSec     *float64 `json:"avg_tpot_sec,omitempty"`
+	// ===== Queue Metrics (from histogram) =====
+	// Direct from request_queue_time_seconds histogram - preferred source
+	MeanQueueSec *float64 `json:"mean_queue_sec,omitempty"` // Mean from histogram
+	P95QueueSec  *float64 `json:"p95_queue_sec,omitempty"`  // P95 from histogram
+
+	// ===== Prefill Metrics (from histogram) =====
+	// Pure PREFILL phase time from request_prefill_time_seconds (not e2e)
+	MeanPrefillSec    *float64 `json:"mean_prefill_sec,omitempty"`     // Mean prefill time per request
+	MeanPrefillPerTok *float64 `json:"mean_prefill_per_tok,omitempty"` // Prefill time per token (seconds/token)
+
+	// ===== Throughput Rate (from PromQL) =====
+	// True request completion rate for Little's Law: λ = rate(request_success_total)
+	LambdaReqPerS *float64 `json:"lambda_req_per_s,omitempty"`
+
+	// ===== Queue Baseline (from PromQL) =====
+	// Historical average queue length for scaling estimation
+	AvgNumWaiting *float64 `json:"avg_num_waiting,omitempty"`
+
+	// ===== TPOT Metrics (from histogram) =====
+	P95TPOTSec *float64 `json:"p95_tpot_sec,omitempty"`
+	AvgTPOTSec *float64 `json:"avg_tpot_sec,omitempty"`
 
 	// Metadata
 	LastUpdated      time.Time `json:"last_updated"`

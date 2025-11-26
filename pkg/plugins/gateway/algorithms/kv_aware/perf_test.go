@@ -321,17 +321,17 @@ func (m *mockBenchMetricsReader) GetPodMetrics(pod PodRef) (PodMetrics, error) {
 	avgTpot := 0.12
 
 	return PodMetrics{
-		NumWaiting:     2.0,
-		NumRunning:     3.0,
-		GPUCacheUsage:  60.0,
-		CPUCacheUsage:  40.0,
-		PromptTokPerS:  1000.0,
-		GenTokPerS:     100.0,
-		MeanPrefillSec: &meanPrefill,
-		P95QueueSec:    &p95Queue,
-		P95TPOTSec:     &p95Tpot,
-		AvgTPOTSec:     &avgTpot,
-		LastUpdated:    time.Now(),
+		NumWaiting:       2.0,
+		NumRunning:       3.0,
+		GPUCacheUsage:    60.0,
+		CPUCacheUsage:    40.0,
+		PromptTokPerS:    1000.0,
+		GenTokPerS:       100.0,
+		MeanPrefillSec:   &meanPrefill,
+		P95QueueSec:      &p95Queue,
+		P95TPOTSec:       &p95Tpot,
+		AvgTPOTSec:       &avgTpot,
+		LastUpdated:      time.Now(),
 		MetricsAvailable: true,
 	}, nil
 }
